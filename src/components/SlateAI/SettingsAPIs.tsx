@@ -472,7 +472,7 @@ export default function SettingsAPIs({
                                 value={draft.azureDeployment}
                                 onChange={(e) =>
                                   setDrafts({
-                                    ...draft,
+                                    ...drafts,
                                     [p.id]: { ...draft, azureDeployment: e.target.value },
                                   })
                                 }
@@ -489,7 +489,7 @@ export default function SettingsAPIs({
                                 value={draft.azureApiVersion}
                                 onChange={(e) =>
                                   setDrafts({
-                                    ...draft,
+                                    ...drafts,
                                     [p.id]: { ...draft, azureApiVersion: e.target.value },
                                   })
                                 }
@@ -512,7 +512,7 @@ export default function SettingsAPIs({
                               value={draft.customModelsText}
                               onChange={(e) =>
                                 setDrafts({
-                                  ...draft,
+                                  ...drafts,
                                   [p.id]: { ...draft, customModelsText: e.target.value },
                                 })
                               }
@@ -533,7 +533,7 @@ export default function SettingsAPIs({
                               value={draft.openRouterMonthlyCapUsd}
                               onChange={(e) =>
                                 setDrafts({
-                                  ...draft,
+                                  ...drafts,
                                   [p.id]: {
                                     ...draft,
                                     openRouterMonthlyCapUsd: e.target.value,

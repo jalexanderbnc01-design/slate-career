@@ -12,6 +12,14 @@ import {
 import { createSlateAIRouter } from "./server/ai/router";
 import { createNotionRouter } from "./server/notion/router";
 import { createClayRouter, createJobsIngestRouter } from "./server/clay/router";
+import {
+  AuthenticatedRequest,
+  FirestoreActor,
+  getAdminFirestore,
+  hasAdminWebhookCredentials,
+  requireFirebaseAuth,
+  sanitizeFirestoreId,
+} from "./server/firebaseStore";
 
 dotenv.config();
 
@@ -55,10 +63,10 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 
 // ======================== SLATE AI ROUTER (/api/ai/*) ========================
-app.use("/api/ai", createSlateAIRouter());
+app.use("/api/ai", requireFirebaseAuth, createSlateAIRouter());
 
 // ======================== NOTION INTEGRATION ROUTER (/api/notion/*) ========================
-app.use("/api/notion", createNotionRouter());
+app.use("/api/notion", requireFirebaseAuth, createNotionRouter());
 
 // ======================== CLAY PIPELINE & JOB INGESTION (/api/jobs/* & /api/clay/*) ========================
 app.use("/api/jobs", createJobsIngestRouter());
@@ -67,7 +75,7 @@ app.use("/api/clay", createClayRouter());
 // ======================== API ENDPOINTS ========================
 
 // Google Maps Platform Config Endpoint
-app.get("/api/maps-config", (req, res) => {
+app.get("/api/maps-config", requireFirebaseAuth, (req: AuthenticatedRequest, res) => {
   const key =
     process.env.GOOGLE_MAPS_PLATFORM_KEY ||
     process.env.VITE_GOOGLE_MAPS_API_KEY ||
@@ -81,7 +89,7 @@ app.get("/api/maps-config", (req, res) => {
 });
 
 // 1. Job Analysis & Match Scoring
-app.post("/api/analyze-job", async (req, res) => {
+app.post("/api/analyze-job", requireFirebaseAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const { jobPosting, jobTitle, companyName, userProfile } = req.body;
     if (!jobPosting) {
@@ -178,7 +186,7 @@ app.post("/api/analyze-job", async (req, res) => {
 });
 
 // 2. Build Tailored Resume
-app.post("/api/build-resume", async (req, res) => {
+app.post("/api/build-resume", requireFirebaseAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const { jobPosting, jobTitle, companyName, resumeStyle, tone, userProfile, analysisKeywords } = req.body;
     
@@ -302,7 +310,7 @@ app.post("/api/build-resume", async (req, res) => {
 });
 
 // 3. Build Cover Letter
-app.post("/api/build-cover-letter", async (req, res) => {
+app.post("/api/build-cover-letter", requireFirebaseAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const { jobPosting, jobTitle, companyName, jobLocation, tone, userProfile } = req.body;
     
@@ -376,7 +384,7 @@ app.post("/api/build-cover-letter", async (req, res) => {
 });
 
 // 4. Build Custom Checklist Guidelines
-app.post("/api/build-steps", async (req, res) => {
+app.post("/api/build-steps", requireFirebaseAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const { jobPosting, jobTitle, companyName } = req.body;
     
@@ -443,7 +451,7 @@ app.post("/api/build-steps", async (req, res) => {
 });
 
 // 5. Generate Full Packet Together
-app.post("/api/build-full-packet", async (req, res) => {
+app.post("/api/build-full-packet", requireFirebaseAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const { jobPosting, jobTitle, companyName, jobLocation, resumeStyle, tone, userProfile } = req.body;
     if (!jobPosting) {
@@ -665,16 +673,127 @@ app.post("/api/build-full-packet", async (req, res) => {
   }
 });
 
+// 5Z. One-time legacy runtime JSON import (Cloud Run ephemeral disk -> Firestore)
+app.post("/api/migration/import-legacy", requireFirebaseAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const uid = req.uid!;
+    if (!hasAdminWebhookCredentials()) {
+      return res.json({ imported: false, reason: "no_admin_credentials" });
+    }
+
+    const fs = await import("fs");
+    const pathMod = await import("path");
+    const dbAdmin = getAdminFirestore();
+    let importedAny = false;
+
+    const readJsonFile = (name: string): Record<string, unknown> | null => {
+      const override = process.env[name.replace(/^\./, "").toUpperCase().replace(/[^A-Z0-9]/g, "_")];
+      const target = override || pathMod.join(process.cwd(), name);
+      try {
+        if (!fs.existsSync(target)) return null;
+        return JSON.parse(fs.readFileSync(target, "utf8")) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    };
+
+    const upsertSettingsDoc = async (docId: string, store: unknown) => {
+      const ref = dbAdmin.doc(`users/${uid}/settings/${docId}`);
+      const snap = await ref.get();
+      if (snap.exists) return false;
+      const prevVersion = 0;
+      await ref.set({
+        uid,
+        kind: docId,
+        data: { store },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        version: prevVersion + 1,
+      });
+      return true;
+    };
+
+    // .slate-ai-runtime.json -> users/{uid}/settings/ai_runtime
+    const aiLegacy = readJsonFile(".slate-ai-runtime.json");
+    if (aiLegacy) {
+      importedAny = await upsertSettingsDoc(
+        "ai_runtime",
+        {
+          configs: aiLegacy.configs || {},
+          usageLogs: Array.isArray(aiLegacy.usageLogs) ? aiLegacy.usageLogs.slice(0, 250) : [],
+        }
+      ) || importedAny;
+    }
+
+    // .notion-runtime.json -> users/{uid}/settings/notion_runtime
+    const notionLegacy = readJsonFile(".notion-runtime.json");
+    if (notionLegacy) {
+      importedAny = await upsertSettingsDoc("notion_runtime", notionLegacy) || importedAny;
+    }
+
+    // .clay-runtime.json -> users/{uid}/leads (leads + companies as lead docs)
+    const clayLegacy = readJsonFile(".clay-runtime.json");
+    if (clayLegacy) {
+      const batch = dbAdmin.batch();
+      let ops = 0;
+      const leads = Array.isArray(clayLegacy.leads) ? clayLegacy.leads : [];
+      const companies = Array.isArray(clayLegacy.companies) ? clayLegacy.companies : [];
+      for (const lead of leads) {
+        const rec = lead as Record<string, unknown>;
+        const id = sanitizeFirestoreId(String(rec.id || ""), "clay_lead");
+        batch.set(dbAdmin.doc(`users/${uid}/leads/${id}`), {
+          uid,
+          recordType: "clay_lead",
+          title: String(rec.title || rec.jobTitle || "Imported lead").slice(0, 240),
+          company: String(rec.company || "").slice(0, 240),
+          status: String(rec.status || "New").slice(0, 100),
+          payload: rec,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          version: 1,
+        }, { merge: false });
+        ops += 1;
+      }
+      for (const company of companies) {
+        const rec = company as Record<string, unknown>;
+        const id = sanitizeFirestoreId(String(rec.id || ""), "clay_co");
+        batch.set(dbAdmin.doc(`users/${uid}/leads/${id}`), {
+          uid,
+          recordType: "clay_company",
+          title: String(rec.name || "Imported company").slice(0, 240),
+          company: String(rec.name || "").slice(0, 240),
+          status: String(rec.status || "New").slice(0, 100),
+          payload: rec,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          version: 1,
+        }, { merge: false });
+        ops += 1;
+      }
+      if (ops > 0) {
+        await batch.commit();
+        importedAny = true;
+      }
+    }
+
+    return res.json({ imported: true, touched: importedAny });
+  } catch (error: any) {
+    console.error("Error in /api/migration/import-legacy:", error);
+    res.status(500).json({ error: error.message || "Legacy import failed." });
+  }
+});
+
 // 6A. Available Job API Sources & Cache Status
-app.get("/api/job-sources", (req, res) => {
+app.get("/api/job-sources", requireFirebaseAuth, (req: AuthenticatedRequest, res) => {
+  const actor: FirestoreActor = { uid: req.uid!, idToken: req.idToken };
   res.json({
     sources: getJobSourcesStatus(),
-    cache: getCacheStats(),
+    cache: getCacheStats(actor),
   });
 });
 
 // 6B. ATS Public Career Board Lookup (Greenhouse, Lever, Ashby)
-app.post("/api/ats-jobs", async (req, res) => {
+app.post("/api/ats-jobs", requireFirebaseAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const { provider, boardSlug, query } = req.body;
     if (!provider || !boardSlug) {
@@ -684,7 +803,10 @@ app.post("/api/ats-jobs", async (req, res) => {
       return res.status(400).json({ error: "Unsupported ATS provider. Use greenhouse, lever, or ashby." });
     }
 
-    const jobs = await fetchAtsBoardJobs(provider, boardSlug, query);
+    const jobs = await fetchAtsBoardJobs(provider, boardSlug, query, {
+      uid: req.uid!,
+      idToken: req.idToken,
+    });
     res.json({
       jobs,
       meta: {
@@ -699,18 +821,21 @@ app.post("/api/ats-jobs", async (req, res) => {
 });
 
 // 6C. Live Columbus & Remote Job Aggregator Search (JSearch, Adzuna, Jooble, USAJOBS, Remotive, The Muse, Arbeitnow + AI Fallback)
-app.post("/api/search-jobs", async (req, res) => {
+app.post("/api/search-jobs", requireFirebaseAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const { query, location = "Columbus, OH", source = "auto", remoteOnly = false } = req.body;
     const cleanQuery = (query || "creative production, print shop, CAD design, remote support").trim();
 
     if (source !== "ai_scan") {
-      const liveResult = await searchLiveJobProviders({
-        query: cleanQuery,
-        location,
-        source,
-        remoteOnly,
-      });
+      const liveResult = await searchLiveJobProviders(
+        {
+          query: cleanQuery,
+          location,
+          source,
+          remoteOnly,
+        },
+        { uid: req.uid!, idToken: req.idToken }
+      );
 
       if (liveResult.jobs.length > 0) {
         return res.json({
@@ -813,7 +938,7 @@ app.post("/api/search-jobs", async (req, res) => {
 });
 
 // 7. Resume Parser & Job Discovery
-app.post("/api/parse-resume", async (req, res) => {
+app.post("/api/parse-resume", requireFirebaseAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const { resumeText } = req.body;
     if (!resumeText) {
@@ -969,7 +1094,7 @@ app.post("/api/parse-resume", async (req, res) => {
 });
 
 // 8. AI Pitch Enhancer
-app.post("/api/enhance-pitch", async (req, res) => {
+app.post("/api/enhance-pitch", requireFirebaseAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const { jobPosting, jobTitle, companyName, userProfile } = req.body;
     if (!userProfile) {
@@ -1027,7 +1152,7 @@ app.post("/api/enhance-pitch", async (req, res) => {
 });
 
 // 9. AI Message Optimizer
-app.post("/api/enhance-message", async (req, res) => {
+app.post("/api/enhance-message", requireFirebaseAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const { messageType, jobTitle, companyName, contactName, portfolioPiece, userProfile } = req.body;
     if (!userProfile) {
@@ -1086,7 +1211,7 @@ app.post("/api/enhance-message", async (req, res) => {
 });
 
 // 10. AI Career Coach Interview Practice Partner
-app.post("/api/interview-practice", async (req, res) => {
+app.post("/api/interview-practice", requireFirebaseAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const { question, userAnswer, jobTitle, companyName, userProfile } = req.body;
     if (!userProfile) {
@@ -1156,7 +1281,7 @@ app.post("/api/interview-practice", async (req, res) => {
 });
 
 // 11. AI Career Workflow Planner
-app.post("/api/tailor-workflow", async (req, res) => {
+app.post("/api/tailor-workflow", requireFirebaseAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const { workflowStyle, jobTitle, companyName, jobDescription, userProfile } = req.body;
     if (!userProfile) {

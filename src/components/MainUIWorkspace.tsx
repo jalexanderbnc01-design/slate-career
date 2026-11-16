@@ -1,4 +1,6 @@
 import React, { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { getUserStoreValue, setUserStoreValue, useUserStoreReady } from '../utils/userStore';
+import { authFetch } from '../firebase/client';
 import {
   Activity,
   ArrowDownRight,
@@ -340,15 +342,9 @@ const makeId = () => Math.random().toString(36).slice(2, 10);
 
 const readData = (): Data => {
   try {
-    const raw = localStorage.getItem(STORE);
+    const raw = getUserStoreValue(STORE);
     if (raw) return { ...starter, ...JSON.parse(raw) };
-    const legacyRaw = localStorage.getItem(LEGACY_STORE);
-    if (!legacyRaw) return starter;
-    const legacy = JSON.parse(legacyRaw);
-    if (legacy.sample === true && legacy.profile?.displayName === 'Alex Morgan') {
-      return { ...starter, theme: legacy.theme === 'dark' ? 'dark' : 'light' };
-    }
-    return { ...starter, ...legacy, sample: false };
+    return starter;
   } catch {
     return starter;
   }
@@ -395,15 +391,7 @@ export default function MainUIWorkspace({
   const [dockWidth, setDockWidth] = useState(480);
   const [isResizingDock, setIsResizingDock] = useState(false);
   const gridForgeRef = React.useRef<HTMLIFrameElement | null>(null);
-  const [savedJobs, setSavedJobs] = useState<AnyRecord[]>(() => {
-    try {
-      const raw = localStorage.getItem('xelime-saved-jobs-v1');
-      const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  });
+  const [savedJobs, setSavedJobs] = useState<AnyRecord[]>([]);
 
   const postToGridForge = React.useCallback(
     (jobsOverride?: AnyRecord[]) => {
@@ -422,9 +410,38 @@ export default function MainUIWorkspace({
     [data.profile, data.skills, savedJobs]
   );
 
+  const storeReady = useUserStoreReady();
+
   useEffect(() => {
-    localStorage.setItem(STORE, JSON.stringify(data));
-  }, [data]);
+    if (!storeReady) return;
+    const raw = getUserStoreValue(STORE);
+    if (raw) {
+      try {
+        setData({ ...starter, ...JSON.parse(raw) });
+      } catch {
+        // Ignore corrupt payload
+      }
+    }
+    const savedRaw = getUserStoreValue('xelime-saved-jobs-v1');
+    if (savedRaw) {
+      try {
+        const parsed = JSON.parse(savedRaw);
+        if (Array.isArray(parsed)) setSavedJobs(parsed);
+      } catch {
+        // Ignore corrupt payload
+      }
+    }
+  }, [storeReady]);
+
+  useEffect(() => {
+    if (!storeReady) return;
+    setUserStoreValue(STORE, JSON.stringify(data));
+  }, [data, storeReady]);
+
+  useEffect(() => {
+    if (!storeReady) return;
+    setUserStoreValue('xelime-saved-jobs-v1', JSON.stringify(savedJobs));
+  }, [savedJobs, storeReady]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -432,6 +449,12 @@ export default function MainUIWorkspace({
       if (event.data.type === 'xelime:saved-jobs' && Array.isArray(event.data.jobs)) {
         setSavedJobs(event.data.jobs);
         postToGridForge(event.data.jobs);
+      }
+      if (event.data.type === 'xelime:feed-state' && event.data.state) {
+        setUserStoreValue('xelime-job-feed-state-v1', JSON.stringify(event.data.state));
+      }
+      if (event.data.type === 'gridforge:request-sync') {
+        postToGridForge();
       }
     };
     window.addEventListener('message', handleMessage);
@@ -2186,10 +2209,10 @@ function SettingsPage(c: ViewContext) {
         </div>
         <div className="setting-row">
           <div>
-            <strong>Local storage</strong>
+            <strong>Cloud sync</strong>
             <span>
-              Saved in this browser's localStorage. Clearing browser data will remove this
-              workspace.
+              Saved to your private Cloud Firestore workspace, synced across devices when
+              you are signed in.
             </span>
           </div>
           <span className="local-tag">
@@ -2270,6 +2293,36 @@ function SettingsPage(c: ViewContext) {
 function JobFeedPrototypePanel({ theme }: { theme: 'light' | 'dark' }) {
   const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
   const [frameKey, setFrameKey] = useState(0);
+  const storeReady = useUserStoreReady();
+
+  const restoreFeedState = React.useCallback(() => {
+    const raw = getUserStoreValue('xelime-job-feed-state-v1');
+    if (!raw) return;
+    try {
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: 'xelime:feed-state-restore', state: JSON.parse(raw) },
+        window.location.origin
+      );
+    } catch {
+      // Ignore corrupt feed state
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin || !event.data) return;
+      if (event.data.type === 'xelime:feed-state-request') {
+        restoreFeedState();
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [restoreFeedState]);
+
+  useEffect(() => {
+    if (!storeReady) return;
+    restoreFeedState();
+  }, [frameKey, storeReady, restoreFeedState]);
 
   const syncTheme = (nextTheme: 'light' | 'dark') => {
     try {
@@ -2325,7 +2378,10 @@ function JobFeedPrototypePanel({ theme }: { theme: 'light' | 'dark' }) {
           ref={iframeRef}
           src="/assets/aistudio/Job_Feed_Prototype_40f07e5a.html"
           title="Job Feed Prototype"
-          onLoad={() => syncTheme(theme)}
+          onLoad={() => {
+            syncTheme(theme);
+            restoreFeedState();
+          }}
           style={{
             width: '100%',
             height: 'max(760px, calc(100dvh - 235px))',

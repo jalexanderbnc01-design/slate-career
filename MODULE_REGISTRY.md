@@ -43,3 +43,19 @@ Details the modular files and directories powering the **Career Application Buil
 ### 10. Technical Bio Facts Editor
 - **Path**: `/src/components/ProfileEditor.tsx`
 - **Purpose**: Tailor structural bio facts.
+
+### 11. Firestore User Store
+- **Path**: `/src/utils/userStore.ts`
+- **Purpose**: Firestore-backed key/value store replacing legacy localStorage blobs under `users/{uid}/settings`.
+
+### 12. Legacy Migration Importer
+- **Path**: `/src/utils/firestoreMigration.ts`
+- **Purpose**: One-time import of localStorage and server runtime JSON into Firestore.
+
+### 13. Tracker Firestore Layer
+- **Path**: `/src/utils/trackerFirestore.ts`
+- **Purpose**: Real-time jobs/groups/comments subscriptions and reconciled writes for the JobTrackerRail.
+
+### 14. Portfolio Cloud Storage
+- **Path**: `/src/utils/portfolioStorage.ts`
+- **Purpose**: Upload/download/delete proof assets in Cloud Storage under `users/{uid}/portfolio`.

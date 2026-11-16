@@ -1,6 +1,6 @@
 import crypto from "crypto";
-import fs from "fs";
-import path from "path";
+import { FieldValue } from "firebase-admin/firestore";
+import { getAdminFirestore, hasAdminWebhookCredentials } from "../firebaseStore";
 import {
   NotionApiError,
   getNotionCredentials,
@@ -33,12 +33,6 @@ import {
   SyncHistoryEntry,
 } from "./types";
 
-function getStorePath(): string {
-  return process.env.NOTION_RUNTIME_STORE_FILE
-    ? path.resolve(process.env.NOTION_RUNTIME_STORE_FILE)
-    : path.join(process.cwd(), ".notion-runtime.json");
-}
-
 function createDefaultStore(): NotionRuntimeStore {
   return {
     enabled: true,
@@ -53,54 +47,88 @@ function createDefaultStore(): NotionRuntimeStore {
 }
 
 let storeCache: NotionRuntimeStore | null = null;
-let lastStorePath = "";
+let hydratedUid: string | null = null;
+
+const NOTION_SETTINGS_DOC_ID = "notion_runtime";
+
+function mergePersistedStore(parsed: Partial<NotionRuntimeStore>): NotionRuntimeStore {
+  return {
+    ...createDefaultStore(),
+    ...parsed,
+    mappings: parsed.mappings || {},
+    authorizedIds: Array.isArray(parsed.authorizedIds)
+      ? parsed.authorizedIds
+      : [],
+    recordLinks: Array.isArray(parsed.recordLinks) ? parsed.recordLinks : [],
+    conflicts: Array.isArray(parsed.conflicts) ? parsed.conflicts : [],
+    syncHistory: Array.isArray(parsed.syncHistory)
+      ? parsed.syncHistory.slice(0, 100)
+      : [],
+  };
+}
+
+export async function hydrateNotionStoreForUser(uid: string): Promise<void> {
+  if (!uid || hydratedUid === uid) return;
+  if (!hasAdminWebhookCredentials()) {
+    hydratedUid = uid;
+    return;
+  }
+  try {
+    const snap = await getAdminFirestore()
+      .doc(`users/${uid}/settings/${NOTION_SETTINGS_DOC_ID}`)
+      .get();
+    if (snap.exists) {
+      const data = snap.data() as {
+        data?: { store?: Partial<NotionRuntimeStore> };
+      } | undefined;
+      if (data?.data?.store) {
+        storeCache = mergePersistedStore(data.data.store);
+      }
+    }
+    hydratedUid = uid;
+  } catch (err) {
+    console.warn("Notion store hydration from Firestore failed:", err);
+    hydratedUid = uid;
+  }
+}
 
 export function loadNotionStore(): NotionRuntimeStore {
-  const targetPath = getStorePath();
-  if (storeCache && lastStorePath === targetPath) {
-    return storeCache;
+  if (!storeCache) {
+    storeCache = createDefaultStore();
   }
-  lastStorePath = targetPath;
-  try {
-    if (fs.existsSync(targetPath)) {
-      const raw = fs.readFileSync(targetPath, "utf8");
-      const parsed = JSON.parse(raw) as Partial<NotionRuntimeStore>;
-      storeCache = {
-        ...createDefaultStore(),
-        ...parsed,
-        mappings: parsed.mappings || {},
-        authorizedIds: Array.isArray(parsed.authorizedIds)
-          ? parsed.authorizedIds
-          : [],
-        recordLinks: Array.isArray(parsed.recordLinks) ? parsed.recordLinks : [],
-        conflicts: Array.isArray(parsed.conflicts) ? parsed.conflicts : [],
-        syncHistory: Array.isArray(parsed.syncHistory)
-          ? parsed.syncHistory.slice(0, 100)
-          : [],
-      };
-      return storeCache;
-    }
-  } catch {
-    // Fallback cleanly
-  }
-  storeCache = createDefaultStore();
   return storeCache;
 }
 
 export function resetNotionStoreCacheForTests() {
   storeCache = null;
-  lastStorePath = "";
+  hydratedUid = null;
 }
 
 function saveNotionStore(store: NotionRuntimeStore) {
   storeCache = store;
-  const targetPath = getStorePath();
-  lastStorePath = targetPath;
-  try {
-    fs.writeFileSync(targetPath, JSON.stringify(store, null, 2), "utf8");
-  } catch {
-    // Ignore read-only filesystem errors gracefully
-  }
+  if (!hydratedUid || !hasAdminWebhookCredentials()) return;
+  const uid = hydratedUid;
+  const ref = getAdminFirestore().doc(`users/${uid}/settings/${NOTION_SETTINGS_DOC_ID}`);
+  ref
+    .get()
+    .then((snap) => {
+      const prevVersion =
+        snap.exists && typeof snap.data()?.version === "number"
+          ? (snap.data()!.version as number)
+          : 0;
+      return ref.set({
+        uid,
+        kind: NOTION_SETTINGS_DOC_ID,
+        data: { store },
+        createdAt:
+          snap.exists && snap.data()?.createdAt
+            ? snap.data()!.createdAt
+            : FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+        version: prevVersion + 1,
+      });
+    })
+    .catch((err) => console.warn("Notion store Firestore persistence failed:", err));
 }
 
 export function sanitizeText(input: unknown, maxLen = 12000): string {

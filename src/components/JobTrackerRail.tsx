@@ -1,5 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import {
+  captureRemoteTrackerIds,
+  subscribeTracker,
+  syncTrackerState,
+  trackerCollectionsAreEmpty,
+  type RemoteTrackerIds,
+} from '../utils/trackerFirestore';
 
 export type TrackerStage =
   | 'Saved'
@@ -38,8 +46,6 @@ interface TrackerState {
   groups: TrackerGroup[];
   jobs: TrackerJob[];
 }
-
-const STORAGE_KEY = 'job-tracker-rail-v1';
 
 const PALETTE = [
   '#19543e',
@@ -160,21 +166,13 @@ function createSeedState(): TrackerState {
 }
 
 function loadState(): TrackerState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.jobs) && Array.isArray(parsed.groups)) {
-        return parsed as TrackerState;
-      }
-    }
-  } catch {
-    // Fallback to seed state
-  }
   return createSeedState();
 }
 
 export default function JobTrackerRail() {
+  const { user } = useAuth();
+  const uid = user?.uid || null;
+
   const [state, setState] = useState<TrackerState>(loadState);
   const [newCompany, setNewCompany] = useState('');
   const [newRole, setNewRole] = useState('');
@@ -196,13 +194,73 @@ export default function JobTrackerRail() {
   const focusGripRef = useRef<{ type: 'job' | 'group'; id: string } | null>(null);
   const armedTimerRef = useRef<number | null>(null);
 
+  const lastRemoteSerializedRef = useRef<string>('');
+  const lastPersistedSerializedRef = useRef<string>('');
+  const remoteIdsRef = useRef<RemoteTrackerIds>({
+    groupIds: new Set<string>(),
+    jobIds: new Set<string>(),
+    commentIds: new Map<string, Set<string>>(),
+  });
+
+  // Seed the rail for brand-new workspaces with an empty Firestore
+  const seededRef = useRef(false);
+
+  // Real-time Firestore subscription with echo suppression
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      // Ignore storage quota errors
-    }
-  }, [state]);
+    if (!uid) return;
+    let cancelled = false;
+    trackerCollectionsAreEmpty(uid)
+      .then((empty) => {
+        if (!cancelled && empty && !seededRef.current) {
+          seededRef.current = true;
+          const seed = createSeedState();
+          syncTrackerState(uid, seed, {
+            groupIds: new Set<string>(),
+            jobIds: new Set<string>(),
+            commentIds: new Map<string, Set<string>>(),
+          }).catch((err) => console.warn('Tracker seed failed:', err));
+        }
+      })
+      .catch(() => {});
+    const unsub = subscribeTracker(
+      uid,
+      (incoming) => {
+        if (cancelled) return;
+        const serialized = JSON.stringify({
+          groups: incoming.groups,
+          jobs: incoming.jobs.map((j) => ({ ...j, comments: [...j.comments].sort((a, b) => a.id.localeCompare(b.id)) })),
+        });
+        if (serialized === lastPersistedSerializedRef.current) {
+          remoteIdsRef.current = captureRemoteTrackerIds(incoming);
+          return;
+        }
+        lastRemoteSerializedRef.current = serialized;
+        remoteIdsRef.current = captureRemoteTrackerIds(incoming);
+        setState(incoming);
+      },
+      (err) => console.warn('Tracker subscription failed:', err)
+    );
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [uid]);
+
+  // Persist local edits to Firestore (full reconcile of jobs/groups/comments)
+  useEffect(() => {
+    if (!uid) return;
+    const serialized = JSON.stringify({
+      groups: state.groups,
+      jobs: state.jobs.map((j) => ({ ...j, comments: [...j.comments].sort((a, b) => a.id.localeCompare(b.id)) })),
+    });
+    if (serialized === lastRemoteSerializedRef.current) return;
+    lastPersistedSerializedRef.current = serialized;
+    syncTrackerState(uid, state, remoteIdsRef.current)
+      .then((nextIds) => {
+        remoteIdsRef.current = nextIds;
+      })
+      .catch((err) => console.warn('Tracker sync failed:', err));
+  }, [state, uid]);
 
   useEffect(() => {
     if (focusGroupInputIdRef.current) {

@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { UserProfile, JobScores, JobFixture, TrackerRow, WeeklyTask } from "../types";
 import { initialColumbusFixtures, defaultTrackerRows, initialWeeklyTasks, initialWalkInStops } from "../data/columbusData";
+import { authFetch } from "../firebase/client";
+import {
+  getUserStoreValue,
+  setUserStoreValue,
+  useUserStoreReady,
+} from "../utils/userStore";
 import {
   fetchLiveJobsFromAggregator,
   fetchJobSourcesStatus,
@@ -73,14 +79,14 @@ interface ColumbusJobFinderProps {
     company: string;
     location: string;
     description: string;
-    style: string;
+    style?: string;
   }) => void;
   onInstantAnalyze: (job: {
     title: string;
     company: string;
     location: string;
     description: string;
-    style: string;
+    style?: string;
   }) => void;
   currentLoadedJobTitle: string;
   userProfile?: UserProfile;
@@ -132,6 +138,7 @@ export default function ColumbusJobFinder({
   onUpdateProfile,
   initialSubTab
 }: ColumbusJobFinderProps) {
+  const storeReady = useUserStoreReady();
   
   // Navigation tabs - Upgraded to 12-tab Workstation
   const [subTab, setSubTab] = useState<"jobs" | "map" | "strong" | "today" | "tracker" | "portfolio" | "companies" | "messages" | "prep" | "settings" | "people" | "bridge" | "workflows">(initialSubTab || "jobs");
@@ -150,7 +157,7 @@ export default function ColumbusJobFinder({
 
   useEffect(() => {
     if (!mapsApiKey) {
-      fetch("/api/maps-config")
+      authFetch("/api/maps-config")
         .then((res) => res.json())
         .then((data) => {
           if (data?.apiKey) {
@@ -165,15 +172,8 @@ export default function ColumbusJobFinder({
   const [hoveredJob, setHoveredJob] = useState<JobFixture | null>(null);
   const [selectedRouteStopId, setSelectedRouteStopId] = useState<string | null>(null);
 
-  // Energy Level state
-  const [energyLevel, setEnergyLevel] = useState<"high" | "normal" | "low" | "rest">(() => {
-    const saved = localStorage.getItem("jaime_energy_level");
-    return (saved as "high" | "normal" | "low" | "rest") || "normal";
-  });
-
-  useEffect(() => {
-    localStorage.setItem("jaime_energy_level", energyLevel);
-  }, [energyLevel]);
+  // Energy Level state (Firestore-backed via userStore)
+  const [energyLevel, setEnergyLevel] = useState<"high" | "normal" | "low" | "rest">("normal");
 
   // Core state fields
   const [searchQuery, setSearchQuery] = useState("");
@@ -320,71 +320,99 @@ export default function ColumbusJobFinder({
     }
   }, [selectedJob]);
 
-  // Job Tracker State
-  const [trackerRows, setTrackerRows] = useState<TrackerRow[]>(() => {
-    const saved = localStorage.getItem("jaime_job_tracker");
-    return saved ? JSON.parse(saved) : defaultTrackerRows;
-  });
+  // Job Tracker State (Firestore-backed via userStore)
+  const [trackerRows, setTrackerRows] = useState<TrackerRow[]>(defaultTrackerRows);
 
   // Map Mode and Drop-by Router States
   const [mapMode, setMapMode] = useState<"gis" | "router">("gis");
-  const [routeChecks, setRouteChecks] = useState<Record<string, boolean>>(() => {
-    const saved = localStorage.getItem("jaime_route_checks");
-    return saved ? JSON.parse(saved) : {};
-  });
+  const [routeChecks, setRouteChecks] = useState<Record<string, boolean>>({});
 
   const toggleRouteCheck = (key: string) => {
     const updated = { ...routeChecks, [key]: !routeChecks[key] };
     setRouteChecks(updated);
-    localStorage.setItem("jaime_route_checks", JSON.stringify(updated));
+    setUserStoreValue("jaime_route_checks", JSON.stringify(updated));
   };
 
-  useEffect(() => {
-    localStorage.setItem("jaime_job_tracker", JSON.stringify(trackerRows));
-  }, [trackerRows]);
-
-  // Company Targets state
-  const [companyTargets, setCompanyTargets] = useState<TargetCompany[]>(() => {
-    const saved = localStorage.getItem("jaime_company_targets");
-    if (saved) return JSON.parse(saved);
-    return [
+  // Company Targets state (Firestore-backed via userStore)
+  const [companyTargets, setCompanyTargets] = useState<TargetCompany[]>([
       { id: "comp-1", name: "Buckeye Print & Sign Shop", category: "Print Shop", location: "Columbus, OH (On-site)", status: "Targeted", contactPerson: "Sarah Jenkins (Shop Manager)", notes: "Full service vinyl plotters and screen printing rigs." },
       { id: "comp-2", name: "FastSigns Arena District", category: "Sign Shop", location: "Columbus, OH (On-site)", status: "Contacted", contactPerson: "Tom Vance (Owner)", notes: "City zoning drawing projects. Uses Illustrator & AutoCAD." },
       { id: "comp-3", name: "Rogue Apparel Printing", category: "Screen Printing", location: "Columbus, OH (Hybrid)", status: "Targeted", contactPerson: "Marcus Clay (Creative Lead)", notes: "Vibrant local clothes branding and custom vector prep." },
       { id: "comp-4", name: "Green Releaf Dispensary", category: "Dispensary", location: "Columbus, OH (On-site)", status: "Targeted", contactPerson: "Elena Cruz (Inventory Director)", notes: "POS cashier + customer care role. Fully low testing risk." }
-    ];
-  });
+    ]
+  );
 
-  useEffect(() => {
-    localStorage.setItem("jaime_company_targets", JSON.stringify(companyTargets));
-  }, [companyTargets]);
-
-  // Daily Missions targets state
-  const [dailyMissions, setDailyMissions] = useState<{ id: string; label: string; completed: boolean }[]>(() => {
-    const saved = localStorage.getItem("jaime_daily_missions");
-    if (saved) return JSON.parse(saved);
-    return [
+  // Daily Missions targets state (Firestore-backed via userStore)
+  const [dailyMissions, setDailyMissions] = useState<{ id: string; label: string; completed: boolean }[]>([
       { id: "dm-1", label: "Browse Columbus Print / Graphics tags and find 3 target studios", completed: false },
       { id: "dm-2", label: "Perform pre-press resume alignment on active target lead", completed: false },
       { id: "dm-3", label: "Identify hiring recruiter name for selected creative vacancy", completed: false },
       { id: "dm-4", label: "Customize overall sliders and bypass safety CDL hazards", completed: false },
       { id: "dm-5", label: "Submit at least 1 warm vector portfolio deck directly", completed: false }
-    ];
-  });
+    ]
+  );
+
+  // Portfolio Built state for Hard Proof Gates (Firestore-backed via userStore)
+  const [builtPortfolioFiles, setBuiltPortfolioFiles] = useState<string[]>(["jaime_apparel_vector_kit.pdf"]);
+
+  // Hydrate all previously-localStorage-backed state from Firestore
+  useEffect(() => {
+    if (!storeReady) return;
+    const energy = getUserStoreValue("jaime_energy_level");
+    if (energy) {
+      try {
+        const parsed = JSON.parse(energy);
+        if (["high", "normal", "low", "rest"].includes(parsed)) setEnergyLevel(parsed);
+      } catch {
+        if (["high", "normal", "low", "rest"].includes(energy)) {
+          setEnergyLevel(energy as "high" | "normal" | "low" | "rest");
+        }
+      }
+    }
+    const loadJson = <T,>(key: string, fallback: T): T => {
+      const raw = getUserStoreValue(key);
+      if (!raw) return fallback;
+      try {
+        const parsed = JSON.parse(raw);
+        return (parsed ?? fallback) as T;
+      } catch {
+        return fallback;
+      }
+    };
+    setTrackerRows(loadJson<TrackerRow[]>("jaime_job_tracker", defaultTrackerRows));
+    setRouteChecks(loadJson<Record<string, boolean>>("jaime_route_checks", {}));
+    const targets = loadJson<TargetCompany[]>("jaime_company_targets", []);
+    if (targets.length > 0) setCompanyTargets(targets);
+    const missions = loadJson<{ id: string; label: string; completed: boolean }[]>("jaime_daily_missions", []);
+    if (missions.length > 0) setDailyMissions(missions);
+    const built = loadJson<string[]>("jaime_built_portfolios", []);
+    if (built.length > 0) setBuiltPortfolioFiles(built);
+  }, [storeReady]);
 
   useEffect(() => {
-    localStorage.setItem("jaime_daily_missions", JSON.stringify(dailyMissions));
-  }, [dailyMissions]);
-
-  // Portfolio Built state for Hard Proof Gates
-  const [builtPortfolioFiles, setBuiltPortfolioFiles] = useState<string[]>(() => {
-    const saved = localStorage.getItem("jaime_built_portfolios");
-    return saved ? JSON.parse(saved) : ["jaime_apparel_vector_kit.pdf"]; // Default apparel kit is active
-  });
+    if (!storeReady) return;
+    setUserStoreValue("jaime_energy_level", JSON.stringify(energyLevel));
+  }, [energyLevel, storeReady]);
 
   useEffect(() => {
-    localStorage.setItem("jaime_built_portfolios", JSON.stringify(builtPortfolioFiles));
-  }, [builtPortfolioFiles]);
+    if (!storeReady) return;
+    setUserStoreValue("jaime_job_tracker", JSON.stringify(trackerRows));
+  }, [trackerRows, storeReady]);
+
+  useEffect(() => {
+    if (!storeReady) return;
+    setUserStoreValue("jaime_company_targets", JSON.stringify(companyTargets));
+  }, [companyTargets, storeReady]);
+
+  useEffect(() => {
+    if (!storeReady) return;
+    setUserStoreValue("jaime_daily_missions", JSON.stringify(dailyMissions));
+  }, [dailyMissions, storeReady]);
+
+  useEffect(() => {
+    if (!storeReady) return;
+    setUserStoreValue("jaime_built_portfolios", JSON.stringify(builtPortfolioFiles));
+  }, [builtPortfolioFiles, storeReady]);
 
   const togglePortfolioBuilt = (filename: string) => {
     setBuiltPortfolioFiles(prev => 

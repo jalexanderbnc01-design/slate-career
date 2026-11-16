@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { authFetch } from "../firebase/client";
 import { JobFixture, TrackerRow, UserProfile } from "../types";
 import { Send, Copy, Check, MessageSquare, ShieldAlert, Sparkles, RefreshCw } from "lucide-react";
 
@@ -142,7 +143,7 @@ Jaime Hernandez`;
     setOptimizingTypes(prev => ({ ...prev, [type]: true }));
     try {
       const activeProfile = userProfile || defaultUserProfile;
-      const res = await fetch("/api/enhance-message", {
+      const res = await authFetch("/api/enhance-message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

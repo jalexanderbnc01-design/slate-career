@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { getUserStoreValue, setUserStoreValue, useUserStoreReady } from "../../utils/userStore";
 import {
   ChatAttachment,
   ChatConversation,
@@ -125,7 +126,7 @@ interface SlateAIChatProps {
 
 function loadXelimeState(): XelimeWorkspaceState {
   try {
-    const raw = localStorage.getItem(XELIME_STORAGE_KEY);
+    const raw = getUserStoreValue(XELIME_STORAGE_KEY);
     if (raw) {
       return JSON.parse(raw) as XelimeWorkspaceState;
     }
@@ -352,43 +353,14 @@ export default function SlateAIChat({
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
   const [showContextDrawer, setShowContextDrawer] = useState<boolean>(true);
 
-  const [routingPolicy, setRoutingPolicy] = useState<RoutingPolicy>(() => {
-    const saved = localStorage.getItem(ROUTING_POLICY_KEY);
-    if (
-      saved === "LOCAL PREFERRED" ||
-      saved === "LOCAL ONLY" ||
-      saved === "CLOUD MANUAL"
-    ) {
-      return saved;
-    }
-    return "LOCAL PREFERRED";
-  });
+  const storeReady = useUserStoreReady();
+  const [routingPolicy, setRoutingPolicy] = useState<RoutingPolicy>("LOCAL PREFERRED");
 
   const [xelimeState, setXelimeState] = useState<XelimeWorkspaceState>(() =>
     loadXelimeState()
   );
 
-  const [conversations, setConversations] = useState<ChatConversation[]>(() => {
-    try {
-      const saved = localStorage.getItem(CONVERSATIONS_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {
-      // Ignore parse errors
-    }
-    return [
-      {
-        id: `conv-${Date.now()}`,
-        title: "New XELIME Session",
-        updatedAt: new Date().toISOString(),
-        providerId: "gemini",
-        model: "gemini-4-hydrogen",
-        messages: [],
-      },
-    ];
-  });
+  const [conversations, setConversations] = useState<ChatConversation[]>([]);
 
   const [activeConvId, setActiveConvId] = useState<string>(
     conversations[0]?.id || ""
@@ -416,19 +388,47 @@ export default function SlateAIChat({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
+  // Hydrate chat state from Firestore (formerly localStorage)
+  useEffect(() => {
+    if (!storeReady) return;
+    const savedPolicy = getUserStoreValue(ROUTING_POLICY_KEY);
+    if (
+      savedPolicy === "LOCAL PREFERRED" ||
+      savedPolicy === "LOCAL ONLY" ||
+      savedPolicy === "CLOUD MANUAL"
+    ) {
+      setRoutingPolicy(savedPolicy);
+    }
+    const savedXelime = getUserStoreValue(XELIME_STORAGE_KEY);
+    if (savedXelime) {
+      try {
+        setXelimeState(JSON.parse(savedXelime) as XelimeWorkspaceState);
+      } catch {
+        // Ignore parse errors
+      }
+    }
+    const savedConversations = getUserStoreValue(CONVERSATIONS_KEY);
+    if (savedConversations) {
+      try {
+        const parsed = JSON.parse(savedConversations);
+        if (Array.isArray(parsed) && parsed.length > 0) setConversations(parsed);
+      } catch {
+        // Ignore parse errors
+      }
+    }
+  }, [storeReady]);
+
   // Sync Routing Policy
   useEffect(() => {
-    localStorage.setItem(ROUTING_POLICY_KEY, routingPolicy);
-  }, [routingPolicy]);
+    if (!storeReady) return;
+    setUserStoreValue(ROUTING_POLICY_KEY, routingPolicy);
+  }, [routingPolicy, storeReady]);
 
   // Sync Conversations
   useEffect(() => {
-    try {
-      localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(conversations));
-    } catch {
-      // Ignore quota errors
-    }
-  }, [conversations]);
+    if (!storeReady) return;
+    setUserStoreValue(CONVERSATIONS_KEY, JSON.stringify(conversations));
+  }, [conversations, storeReady]);
 
   // Listen for external XELIME updates from XelimeSystem tab
   useEffect(() => {
@@ -440,10 +440,10 @@ export default function SlateAIChat({
   const persistXelimeState = (next: XelimeWorkspaceState) => {
     setXelimeState(next);
     try {
-      localStorage.setItem(XELIME_STORAGE_KEY, JSON.stringify(next));
+      setUserStoreValue(XELIME_STORAGE_KEY, JSON.stringify(next));
       window.dispatchEvent(new CustomEvent("xelime-state-updated"));
     } catch {
-      // Ignore storage error
+      // Ignore persistence error
     }
   };
 

@@ -1,4 +1,5 @@
 import { JobFixture } from "../types";
+import { authFetch } from "../firebase/client";
 
 export interface JobSourceOption {
   id: string;
@@ -75,7 +76,7 @@ function normalizeClientJobs(rawList: any[]): JobFixture[] {
  * Fetches available job aggregator sources & configuration status from the Express backend.
  */
 export async function fetchJobSourcesStatus(): Promise<{ sources: JobSourceOption[]; cacheEntries: number }> {
-  const response = await fetch("/api/job-sources");
+  const response = await authFetch("/api/job-sources");
   if (!response.ok) {
     throw new Error(`Failed to load job source status (${response.status})`);
   }
@@ -94,7 +95,7 @@ export async function fetchLiveJobsFromAggregator(
   query: string,
   options?: { source?: string; location?: string; remoteOnly?: boolean }
 ): Promise<LiveJobSearchResponse> {
-  const response = await fetch("/api/search-jobs", {
+  const response = await authFetch("/api/search-jobs", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -127,7 +128,7 @@ export async function fetchAtsBoardJobs(
   boardSlug: string,
   query?: string
 ): Promise<LiveJobSearchResponse> {
-  const response = await fetch("/api/ats-jobs", {
+  const response = await authFetch("/api/ats-jobs", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

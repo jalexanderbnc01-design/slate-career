@@ -1,3 +1,4 @@
+import { authFetch } from "../firebase/client";
 export type ProviderCategory =
   | "Local AI Runtimes"
   | "Cloud AI Providers"
@@ -149,7 +150,7 @@ export interface UsageSummaryResponse {
 }
 
 export async function fetchAIProviders(): Promise<ProviderSnapshot[]> {
-  const res = await fetch("/api/ai/providers");
+  const res = await authFetch("/api/ai/providers");
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error || "Failed to load AI providers.");
   return data.providers || [];
@@ -199,14 +200,14 @@ export async function discoverAIProviderModels(providerId: string): Promise<{
 }
 
 export async function fetchAIUsage(): Promise<UsageSummaryResponse> {
-  const res = await fetch("/api/ai/usage");
+  const res = await authFetch("/api/ai/usage");
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error || "Failed to load AI usage metrics.");
   return data;
 }
 
 export async function resetAIUsage(): Promise<UsageSummaryResponse> {
-  const res = await fetch("/api/ai/usage/reset", { method: "POST" });
+  const res = await authFetch("/api/ai/usage/reset", { method: "POST" });
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error || "Failed to reset usage logs.");
   return data.usage;
@@ -222,7 +223,7 @@ export async function sendSlateAIChat(params: {
   onDelta?: (text: string) => void;
   onUsage?: (usage: NonNullable<ChatMessage["usage"]>) => void;
 }): Promise<{ content: string; usage?: ChatMessage["usage"] }> {
-  const res = await fetch("/api/ai/chat", {
+  const res = await authFetch("/api/ai/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

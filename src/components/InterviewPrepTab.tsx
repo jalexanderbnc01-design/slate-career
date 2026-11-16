@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { authFetch } from "../firebase/client";
 import { JobFixture } from "../types";
 import { 
   Clipboard, 
@@ -137,7 +138,7 @@ export default function InterviewPrepTab({
     setIsLoading(true);
     try {
       const activeProfile = userProfile || defaultUserProfile;
-      const res = await fetch("/api/enhance-pitch", {
+      const res = await authFetch("/api/enhance-pitch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -270,7 +271,7 @@ Jaime`;
     setPracticeFeedback(null);
     try {
       const activeProfile = userProfile || defaultUserProfile;
-      const res = await fetch("/api/interview-practice", {
+      const res = await authFetch("/api/interview-practice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

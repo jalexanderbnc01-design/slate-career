@@ -1,6 +1,8 @@
 import { UserProfile } from "../types";
 import { XelimeWorkspaceState, XelimeOpportunity, XelimeProject, XelimeSkill } from "../types/xelime";
 import { defaultXelimeState } from "../data/xelimeDefaults";
+import { authFetch } from "../firebase/client";
+import { getUserStoreValue, setUserStoreValue } from "./userStore";
 
 export type NotionDomainKey = "profile" | "skills" | "applications" | "portfolio";
 
@@ -184,7 +186,7 @@ export const DOMAIN_FIELD_LABELS: Record<
 };
 
 async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  const res = await authFetch(url, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -400,7 +402,7 @@ const XELIME_STORAGE_KEY = "xelime_xcms_state_v1";
 
 export function loadLocalXelimeState(): XelimeWorkspaceState {
   try {
-    const raw = localStorage.getItem(XELIME_STORAGE_KEY);
+    const raw = getUserStoreValue(XELIME_STORAGE_KEY);
     if (raw) return JSON.parse(raw) as XelimeWorkspaceState;
   } catch {
     // fallback cleanly
@@ -616,7 +618,7 @@ export function mergePulledRecordsIntoLocal(pulledByDomain: Record<string, any[]
   }
 
   try {
-    localStorage.setItem(XELIME_STORAGE_KEY, JSON.stringify(state));
+    setUserStoreValue(XELIME_STORAGE_KEY, JSON.stringify(state));
     window.dispatchEvent(new CustomEvent("xelime-state-updated"));
   } catch {
     // ignore storage quota

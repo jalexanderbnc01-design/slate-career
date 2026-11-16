@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { getUserStoreValue, setUserStoreValue, useUserStoreReady } from "../utils/userStore";
 import {
   XelimeWorkspaceState,
   XelimeCareerPath,
@@ -119,35 +120,35 @@ interface XelimeSystemProps {
 }
 
 export default function XelimeSystem({ onImportToBuilder }: XelimeSystemProps) {
-  const [state, setState] = useState<XelimeWorkspaceState>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch {
-      // Fallback to default state
-    }
-    return defaultXelimeState;
-  });
+  const storeReady = useUserStoreReady();
+  const [state, setState] = useState<XelimeWorkspaceState>(defaultXelimeState);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      // Ignore quota errors
+    if (!storeReady) return;
+    const saved = getUserStoreValue(STORAGE_KEY);
+    if (saved) {
+      try {
+        setState(JSON.parse(saved));
+      } catch {
+        // Fallback to default state
+      }
     }
-  }, [state]);
+  }, [storeReady]);
+
+  useEffect(() => {
+    if (!storeReady) return;
+    setUserStoreValue(STORAGE_KEY, JSON.stringify(state));
+  }, [state, storeReady]);
 
   useEffect(() => {
     const handleSync = () => {
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
+      const saved = getUserStoreValue(STORAGE_KEY);
+      if (saved) {
+        try {
           setState(JSON.parse(saved));
+        } catch {
+          // Ignore parse errors
         }
-      } catch {
-        // Ignore parse errors
       }
     };
     window.addEventListener("xelime-state-updated", handleSync);
@@ -620,7 +621,7 @@ export default function XelimeSystem({ onImportToBuilder }: XelimeSystemProps) {
 
   const handleResetBaseline = () => {
     setState(defaultXelimeState);
-    localStorage.removeItem(STORAGE_KEY);
+    setUserStoreValue(STORAGE_KEY, JSON.stringify(defaultXelimeState));
   };
 
   const navItems: { id: XcmsSection; label: string; icon: React.ReactNode }[] = [

@@ -1,17 +1,18 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import {
   auth,
   signInWithGoogle,
   signOutFirebase,
 } from "../firebase/client";
+import {
+  migrateLocalStorageToFirestore,
+  type MigrationSummary,
+} from "../utils/firestoreMigration";
+import { hydrateUserStore, resetUserStore } from "../utils/userStore";
 import { ShieldCheck, LogIn, LogOut, AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react";
 
-export interface MigrationSummary {
-  migratedCount: number;
-  legacyKeysCleared: number;
-  serverImported: boolean;
-}
+export type { MigrationSummary };
 
 interface AuthContextValue {
   user: User | null;
@@ -36,6 +37,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [migrationSummary, setMigrationSummary] =
     useState<MigrationSummary | null>(null);
 
+  const migrationRunForRef = useRef<string | null>(null);
+
   useEffect(() => {
     const unsub = onAuthStateChanged(
       auth,
@@ -43,6 +46,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(nextUser);
         setAuthLoading(false);
         setAuthError(null);
+        if (nextUser && migrationRunForRef.current !== nextUser.uid) {
+          migrationRunForRef.current = nextUser.uid;
+          hydrateUserStore(nextUser.uid)
+            .then(() => migrateLocalStorageToFirestore(nextUser.uid))
+            .then((summary) => {
+              if (summary.migratedCount > 0 || summary.legacyKeysCleared > 0) {
+                setMigrationSummary(summary);
+              }
+            })
+            .catch((err) => {
+              console.warn("One-time Firestore migration failed:", err);
+            });
+        }
+        if (!nextUser) {
+          resetUserStore();
+        }
       },
       (err) => {
         setAuthError(err?.message || "Authentication listener failed.");

@@ -1,5 +1,8 @@
-import fs from "fs";
-import path from "path";
+import { FieldValue } from "firebase-admin/firestore";
+import {
+  getAdminFirestore,
+  hasAdminWebhookCredentials,
+} from "../firebaseStore";
 import {
   AIModelInfo,
   ConnectionState,
@@ -11,8 +14,6 @@ interface PersistedAIStore {
   configs: Record<string, ProviderRuntimeConfig>;
   usageLogs: UsageLogEntry[];
 }
-
-const STORE_FILE = path.join(process.cwd(), ".slate-ai-runtime.json");
 
 const DEFAULT_CONFIGS: Record<string, ProviderRuntimeConfig> = {
   gemini: { enabled: true },
@@ -44,40 +45,84 @@ const DEFAULT_CONFIGS: Record<string, ProviderRuntimeConfig> = {
   firebase_ai_logic: { enabled: false },
 };
 
-let memoryStore: PersistedAIStore = loadFromDisk();
-
-// Transient runtime discovery state (not persisted as confirmed across restarts until probed)
-const liveStatusCache: Record<
-  string,
-  { status: ConnectionState; message: string; models: AIModelInfo[]; checkedAt?: string }
-> = {};
-
-function loadFromDisk(): PersistedAIStore {
-  try {
-    if (fs.existsSync(STORE_FILE)) {
-      const raw = fs.readFileSync(STORE_FILE, "utf8");
-      const parsed = JSON.parse(raw) as Partial<PersistedAIStore>;
-      return {
-        configs: { ...DEFAULT_CONFIGS, ...(parsed.configs || {}) },
-        usageLogs: Array.isArray(parsed.usageLogs) ? parsed.usageLogs.slice(0, 250) : [],
-      };
-    }
-  } catch {
-    // Fallback cleanly to defaults
-  }
+function createDefaultPersistedStore(): PersistedAIStore {
   return {
     configs: JSON.parse(JSON.stringify(DEFAULT_CONFIGS)),
     usageLogs: [],
   };
 }
 
-function saveToDisk() {
+let memoryStore: PersistedAIStore = createDefaultPersistedStore();
+
+const AI_SETTINGS_DOC_ID = "ai_runtime";
+let aiStoreOwnerUid: string | null = null;
+let hydratedOwnerUid: string | null = null;
+
+export function setAiStoreOwner(uid: string | null): void {
+  aiStoreOwnerUid = uid || null;
+}
+
+export async function hydrateAiStoreForUser(uid: string): Promise<void> {
+  if (!uid || hydratedOwnerUid === uid) return;
+  if (!hasAdminWebhookCredentials()) {
+    hydratedOwnerUid = uid;
+    return;
+  }
   try {
-    fs.writeFileSync(STORE_FILE, JSON.stringify(memoryStore, null, 2), "utf8");
-  } catch {
-    // Ignore read-only filesystem edge cases gracefully
+    const snap = await getAdminFirestore()
+      .doc(`users/${uid}/settings/${AI_SETTINGS_DOC_ID}`)
+      .get();
+    if (snap.exists) {
+      const data = snap.data() as { data?: { store?: Partial<PersistedAIStore> } } | undefined;
+      const persisted = data?.data?.store;
+      if (persisted) {
+        memoryStore = {
+          configs: { ...DEFAULT_CONFIGS, ...(persisted.configs || {}) },
+          usageLogs: Array.isArray(persisted.usageLogs)
+            ? persisted.usageLogs.slice(0, 250)
+            : [],
+        };
+      }
+    }
+    hydratedOwnerUid = uid;
+  } catch (err) {
+    console.warn("AI store hydration from Firestore failed:", err);
+    hydratedOwnerUid = uid;
   }
 }
+
+function persistStore() {
+  if (!aiStoreOwnerUid || !hasAdminWebhookCredentials()) return;
+  const ownerUid = aiStoreOwnerUid;
+  const payload = {
+    configs: memoryStore.configs,
+    usageLogs: memoryStore.usageLogs,
+  };
+  const ref = getAdminFirestore().doc(`users/${ownerUid}/settings/${AI_SETTINGS_DOC_ID}`);
+  ref
+    .get()
+    .then((snap) => {
+      const prevVersion =
+        snap.exists && typeof snap.data()?.version === "number"
+          ? (snap.data()!.version as number)
+          : 0;
+      return ref.set({
+        uid: ownerUid,
+        kind: AI_SETTINGS_DOC_ID,
+        data: { store: payload },
+        createdAt: snap.exists && snap.data()?.createdAt ? snap.data()!.createdAt : FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+        version: prevVersion + 1,
+      });
+    })
+    .catch((err) => console.warn("AI store Firestore persistence failed:", err));
+}
+
+// Transient runtime discovery state (not persisted as confirmed across restarts until probed)
+const liveStatusCache: Record<
+  string,
+  { status: ConnectionState; message: string; models: AIModelInfo[]; checkedAt?: string }
+> = {};
 
 export function getProviderConfig(providerId: string): ProviderRuntimeConfig {
   return (
@@ -117,7 +162,7 @@ export function updateProviderConfig(
   };
 
   memoryStore.configs[providerId] = updated;
-  saveToDisk();
+  persistStore();
   return updated;
 }
 
@@ -144,7 +189,7 @@ export function recordUsageEntry(entry: Omit<UsageLogEntry, "id" | "timestamp">)
     ...entry,
   };
   memoryStore.usageLogs = [full, ...memoryStore.usageLogs].slice(0, 250);
-  saveToDisk();
+  persistStore();
   return full;
 }
 
@@ -226,5 +271,5 @@ export function getUsageSummary() {
 
 export function resetUsageLogs() {
   memoryStore.usageLogs = [];
-  saveToDisk();
+  persistStore();
 }

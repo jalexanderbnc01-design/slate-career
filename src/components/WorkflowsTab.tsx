@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from "react";
+import { getUserStoreValue, setUserStoreValue, useUserStoreReady } from "../utils/userStore";
+import { authFetch } from "../firebase/client";
 import { JobFixture, UserProfile } from "../types";
 import { 
   GitFork, 
@@ -89,6 +91,7 @@ export default function WorkflowsTab({
   onSelectJob,
   userProfile
 }: WorkflowsTabProps) {
+  const storeReady = useUserStoreReady();
   const [selectedStrategy, setSelectedStrategy] = useState("physical_loop");
   const [activeWorkflow, setActiveWorkflow] = useState<CustomWorkflow | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -256,9 +259,9 @@ export default function WorkflowsTab({
     };
   };
 
-  // Load active workflow from localStorage or defaults on start
+  // Load active workflow from Firestore (formerly localStorage) or defaults on start
   useEffect(() => {
-    const saved = localStorage.getItem("jaime_active_workflow");
+    const saved = getUserStoreValue("jaime_active_workflow");
     if (saved) {
       try {
         setActiveWorkflow(JSON.parse(saved));
@@ -275,7 +278,7 @@ export default function WorkflowsTab({
         setActiveWorkflow(generateLocalTailoredWorkflow(selectedStrategy, baseJob));
       }
     }
-  }, [selectedJob]);
+  }, [selectedJob, storeReady]);
 
   // Handle strategy icon selection
   const handleSelectStrategy = (stratId: string) => {
@@ -284,7 +287,7 @@ export default function WorkflowsTab({
     if (baseJob) {
       const updated = generateLocalTailoredWorkflow(stratId, baseJob);
       setActiveWorkflow(updated);
-      localStorage.setItem("jaime_active_workflow", JSON.stringify(updated));
+      setUserStoreValue("jaime_active_workflow", JSON.stringify(updated));
     }
   };
 
@@ -304,7 +307,7 @@ export default function WorkflowsTab({
     const stratName = matchedStrat ? matchedStrat.name : "Custom";
 
     try {
-      const res = await fetch("/api/tailor-workflow", {
+      const res = await authFetch("/api/tailor-workflow", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -329,7 +332,7 @@ export default function WorkflowsTab({
           stages: data.stages
         };
         setActiveWorkflow(tailored);
-        localStorage.setItem("jaime_active_workflow", JSON.stringify(tailored));
+        setUserStoreValue("jaime_active_workflow", JSON.stringify(tailored));
         setActiveStageIndex(0);
       } else {
         throw new Error("Invalid format from server.");
@@ -339,7 +342,7 @@ export default function WorkflowsTab({
       // fallback
       const localBack = generateLocalTailoredWorkflow(selectedStrategy, baseJob);
       setActiveWorkflow(localBack);
-      localStorage.setItem("jaime_active_workflow", JSON.stringify(localBack));
+      setUserStoreValue("jaime_active_workflow", JSON.stringify(localBack));
       setActiveStageIndex(0);
       setErrorMsg("Note: Refined offline as Gemini connection bypassed. Tailored blueprint loaded safely.");
     } finally {
@@ -359,7 +362,7 @@ export default function WorkflowsTab({
       stages: updatedStages
     };
     setActiveWorkflow(newWorkflow);
-    localStorage.setItem("jaime_active_workflow", JSON.stringify(newWorkflow));
+    setUserStoreValue("jaime_active_workflow", JSON.stringify(newWorkflow));
   };
 
   // Add custom task to stage
@@ -383,7 +386,7 @@ export default function WorkflowsTab({
       stages: updatedStages
     };
     setActiveWorkflow(newWorkflow);
-    localStorage.setItem("jaime_active_workflow", JSON.stringify(newWorkflow));
+    setUserStoreValue("jaime_active_workflow", JSON.stringify(newWorkflow));
     
     // reset fields
     setNewTaskLabel("");
@@ -402,7 +405,7 @@ export default function WorkflowsTab({
       stages: updatedStages
     };
     setActiveWorkflow(newWorkflow);
-    localStorage.setItem("jaime_active_workflow", JSON.stringify(newWorkflow));
+    setUserStoreValue("jaime_active_workflow", JSON.stringify(newWorkflow));
   };
 
   // Copy scripts helper

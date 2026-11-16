@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { authFetch } from "../firebase/client";
 import { JobFixture, UserProfile, TrackerRow } from "../types";
 import { 
   Sparkles, 
@@ -105,7 +106,7 @@ export default function ApplicationDispatchDesk({
     setIsGeneratingPitch(true);
     setPitchError(null);
     try {
-      const response = await fetch("/api/enhance-pitch", {
+      const response = await authFetch("/api/enhance-pitch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

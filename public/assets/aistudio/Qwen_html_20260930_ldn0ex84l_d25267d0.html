@@ -569,18 +569,12 @@
     });
 
     // --- Workspace Sync & Clean 25px Snap Layout ---
+    // State now flows through postMessage from the React parent (Firestore-backed);
+    // localStorage is no longer used inside this iframe.
     function loadFromStorage() {
       try {
-        const rawWorkspace = JSON.parse(localStorage.getItem(XELIME_STORE_KEY) || 'null');
-        if (rawWorkspace && typeof rawWorkspace === 'object') {
-          workspaceState.profile = rawWorkspace.profile || workspaceState.profile;
-          workspaceState.skills = Array.isArray(rawWorkspace.skills) ? rawWorkspace.skills : [];
-        }
-      } catch {}
-      try {
-        const rawJobs = JSON.parse(localStorage.getItem(SAVED_JOBS_KEY) || 'null');
-        if (Array.isArray(rawJobs)) {
-          workspaceState.savedJobs = rawJobs;
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'gridforge:request-sync' }, window.location.origin);
         }
       } catch {}
     }

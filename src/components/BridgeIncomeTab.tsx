@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { getUserStoreValue, setUserStoreValue, useUserStoreReady } from "../utils/userStore";
 import { 
   DollarSign, 
   Plus, 
@@ -29,15 +30,10 @@ interface BridgeIncomeTabProps {
 }
 
 export default function BridgeIncomeTab({ onCopyText, copiedKey }: BridgeIncomeTabProps) {
-  const [weeklyTarget, setWeeklyTarget] = useState<number>(() => {
-    const saved = localStorage.getItem("jaime_bridge_target");
-    return saved ? parseInt(saved, 10) : 400; // Default $400/week for survival
-  });
+  const storeReady = useUserStoreReady();
+  const [weeklyTarget, setWeeklyTarget] = useState<number>(400); // Default $400/week for survival
 
-  const [gigs, setGigs] = useState<SideGig[]>(() => {
-    const saved = localStorage.getItem("jaime_bridge_gigs");
-    if (saved) return JSON.parse(saved);
-    return [
+  const [gigs, setGigs] = useState<SideGig[]>([
       {
         id: "gig-1",
         source: "Fiverr",
@@ -70,17 +66,37 @@ export default function BridgeIncomeTab({ onCopyText, copiedKey }: BridgeIncomeT
         amount: 200,
         status: "Pending"
       }
-    ];
-  });
+    ]
+  );
+
+  useEffect(() => {
+    if (!storeReady) return;
+    const savedTarget = getUserStoreValue("jaime_bridge_target");
+    if (savedTarget) {
+      const parsed = parseInt(savedTarget, 10);
+      if (!Number.isNaN(parsed)) setWeeklyTarget(parsed);
+    }
+    const savedGigs = getUserStoreValue("jaime_bridge_gigs");
+    if (savedGigs) {
+      try {
+        const parsed = JSON.parse(savedGigs);
+        if (Array.isArray(parsed) && parsed.length > 0) setGigs(parsed);
+      } catch {
+        // Keep defaults on corrupt payload
+      }
+    }
+  }, [storeReady]);
 
   // Save states
   useEffect(() => {
-    localStorage.setItem("jaime_bridge_target", weeklyTarget.toString());
-  }, [weeklyTarget]);
+    if (!storeReady) return;
+    setUserStoreValue("jaime_bridge_target", weeklyTarget.toString());
+  }, [weeklyTarget, storeReady]);
 
   useEffect(() => {
-    localStorage.setItem("jaime_bridge_gigs", JSON.stringify(gigs));
-  }, [gigs]);
+    if (!storeReady) return;
+    setUserStoreValue("jaime_bridge_gigs", JSON.stringify(gigs));
+  }, [gigs, storeReady]);
 
   // Form states
   const [source, setSource] = useState("Fiverr");

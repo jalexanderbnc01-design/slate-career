@@ -1,6 +1,8 @@
 import { UserProfile } from "../types";
 import { XelimeOpportunity, XelimeWorkspaceState } from "../types/xelime";
 import { defaultXelimeState } from "../data/xelimeDefaults";
+import { authFetch } from "../firebase/client";
+import { getUserStoreValue, setUserStoreValue } from "./userStore";
 
 export type IngestedLeadStatus =
   | "New"
@@ -109,7 +111,7 @@ export interface ClayStatusResponse {
 }
 
 async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  const res = await authFetch(url, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -215,7 +217,7 @@ export function addIngestedLeadToXelime(lead: IngestedJobLead): {
 } {
   let state: XelimeWorkspaceState = defaultXelimeState;
   try {
-    const raw = localStorage.getItem(XELIME_STORAGE_KEY);
+    const raw = getUserStoreValue(XELIME_STORAGE_KEY);
     if (raw) state = JSON.parse(raw) as XelimeWorkspaceState;
   } catch {
     state = defaultXelimeState;
@@ -284,7 +286,7 @@ export function addIngestedLeadToXelime(lead: IngestedJobLead): {
     opportunities: [newOpp, ...state.opportunities],
   };
 
-  localStorage.setItem(XELIME_STORAGE_KEY, JSON.stringify(nextState));
+  setUserStoreValue(XELIME_STORAGE_KEY, JSON.stringify(nextState));
   window.dispatchEvent(new CustomEvent("xelime-state-updated"));
 
   return {
@@ -299,7 +301,7 @@ export function addIngestedCompanyToXelime(company: IngestedCompanyRecord): {
 } {
   let state: XelimeWorkspaceState = defaultXelimeState;
   try {
-    const raw = localStorage.getItem(XELIME_STORAGE_KEY);
+    const raw = getUserStoreValue(XELIME_STORAGE_KEY);
     if (raw) state = JSON.parse(raw) as XelimeWorkspaceState;
   } catch {
     state = defaultXelimeState;
@@ -357,7 +359,7 @@ export function addIngestedCompanyToXelime(company: IngestedCompanyRecord): {
     opportunities: [newOpp, ...state.opportunities],
   };
 
-  localStorage.setItem(XELIME_STORAGE_KEY, JSON.stringify(nextState));
+  setUserStoreValue(XELIME_STORAGE_KEY, JSON.stringify(nextState));
   window.dispatchEvent(new CustomEvent("xelime-state-updated"));
 
   return {

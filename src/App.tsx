@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { UserProfile, JobAnalysis, ResumeData, CoverLetterData, ChecklistItem, ApplicationPacket } from "./types";
 import { defaultProfile } from "./defaultProfile";
+import { authFetch } from "./firebase/client";
+import {
+  getUserStoreValue,
+  setUserStoreValue,
+  useUserStoreReady,
+} from "./utils/userStore";
 import ProfileEditor from "./components/ProfileEditor";
 import AnalysisViewer from "./components/AnalysisViewer";
 import ResumeViewer from "./components/ResumeViewer";
@@ -45,11 +51,10 @@ import {
 } from "lucide-react";
 
 export default function App() {
+  const storeReady = useUserStoreReady();
+
   // Profiles
-  const [profile, setProfile] = useState<UserProfile>(() => {
-    const saved = localStorage.getItem("slate_draftman_profile");
-    return saved ? JSON.parse(saved) : defaultProfile;
-  });
+  const [profile, setProfile] = useState<UserProfile>(defaultProfile);
 
   const [isLeftPanelCollapsed, setIsLeftPanelCollapsed] = useState(false);
   const [showMainUI, setShowMainUI] = useState(false);
@@ -83,22 +88,46 @@ export default function App() {
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error' | 'info', text: string } | null>(null);
   const [isSubmittingDesk, setIsSubmittingDesk] = useState(false);
 
-  // Saved Packets LocalStorage
-  const [savedPackets, setSavedPackets] = useState<ApplicationPacket[]>(() => {
-    const saved = localStorage.getItem("slate_application_packets");
-    return saved ? JSON.parse(saved) : [];
-  });
+  // Saved Packets (Firestore-backed via userStore)
+  const [savedPackets, setSavedPackets] = useState<ApplicationPacket[]>([]);
   const [activePacketId, setActivePacketId] = useState<string | null>(null);
+
+  // Load persisted profile + packets once the user store is hydrated
+  useEffect(() => {
+    if (!storeReady) return;
+    const savedProfile = getUserStoreValue("slate_draftman_profile");
+    if (savedProfile) {
+      try {
+        const parsed = JSON.parse(savedProfile);
+        if (parsed && typeof parsed === "object") {
+          setProfile({ ...defaultProfile, ...parsed });
+        }
+      } catch {
+        // Keep defaults on corrupt payload
+      }
+    }
+    const savedPacketsRaw = getUserStoreValue("slate_application_packets");
+    if (savedPacketsRaw) {
+      try {
+        const parsed = JSON.parse(savedPacketsRaw);
+        if (Array.isArray(parsed)) setSavedPackets(parsed);
+      } catch {
+        // Keep empty list on corrupt payload
+      }
+    }
+  }, [storeReady]);
 
   // Sync profile details
   useEffect(() => {
-    localStorage.setItem("slate_draftman_profile", JSON.stringify(profile));
-  }, [profile]);
+    if (!storeReady) return;
+    setUserStoreValue("slate_draftman_profile", JSON.stringify(profile));
+  }, [profile, storeReady]);
 
   // Sync saved packets list
   useEffect(() => {
-    localStorage.setItem("slate_application_packets", JSON.stringify(savedPackets));
-  }, [savedPackets]);
+    if (!storeReady) return;
+    setUserStoreValue("slate_application_packets", JSON.stringify(savedPackets));
+  }, [savedPackets, storeReady]);
 
   // Load a CAD Tech sample vacancies posting instantly
   const loadCADSamplePosting = () => {
@@ -128,7 +157,7 @@ export default function App() {
     setActiveTab("matchScore");
     
     try {
-      const response = await fetch("/api/analyze-job", {
+      const response = await authFetch("/api/analyze-job", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -165,7 +194,7 @@ export default function App() {
     setActiveTab("resume");
 
     try {
-      const response = await fetch("/api/build-resume", {
+      const response = await authFetch("/api/build-resume", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -205,7 +234,7 @@ export default function App() {
     setActiveTab("coverLetter");
 
     try {
-      const response = await fetch("/api/build-cover-letter", {
+      const response = await authFetch("/api/build-cover-letter", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -244,7 +273,7 @@ export default function App() {
     setActiveTab("steps");
 
     try {
-      const response = await fetch("/api/build-steps", {
+      const response = await authFetch("/api/build-steps", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -280,7 +309,7 @@ export default function App() {
     showNotice('info', 'Compiling complete packet. This takes a moment...');
 
     try {
-      const response = await fetch("/api/build-full-packet", {
+      const response = await authFetch("/api/build-full-packet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -862,7 +891,7 @@ export default function App() {
                   setCompanyName(job.company);
                   setJobLocation(job.location);
                   setJobPostingRaw(job.description);
-                  setResumeStyle(job.style);
+                  setResumeStyle(job.style || "CAD Technician");
                   showNotice("success", `Imported "${job.title}" into targets!`);
                 }}
                 onInstantAnalyze={async (job) => {
@@ -870,12 +899,12 @@ export default function App() {
                   setCompanyName(job.company);
                   setJobLocation(job.location);
                   setJobPostingRaw(job.description);
-                  setResumeStyle(job.style);
+                  setResumeStyle(job.style || "CAD Technician");
                   
                   showNotice("info", `Importing and compiling entire portfolio for ${job.title}...`);
                   setIsBuildingFull(true);
                   try {
-                     const response = await fetch("/api/build-full-packet", {
+                     const response = await authFetch("/api/build-full-packet", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({
@@ -923,7 +952,7 @@ export default function App() {
                   setCompanyName(job.company);
                   setJobLocation(job.location);
                   setJobPostingRaw(job.description);
-                  setResumeStyle(job.style);
+                  setResumeStyle(job.style || "CAD Technician");
                   setIsLeftPanelCollapsed(false);
                   showNotice("success", `Loaded "${job.title}" from XELIME into the Application Builder!`);
                 }}
@@ -937,7 +966,7 @@ export default function App() {
                   setCompanyName(job.company);
                   setJobLocation(job.location);
                   setJobPostingRaw(job.description);
-                  setResumeStyle(job.style);
+                  setResumeStyle(job.style || "CAD Technician");
                   setIsLeftPanelCollapsed(false);
                   showNotice("success", `Loaded "${job.title}" from Clay Pipeline into Application Builder!`);
                 }}
@@ -946,11 +975,11 @@ export default function App() {
                   setCompanyName(job.company);
                   setJobLocation(job.location);
                   setJobPostingRaw(job.description);
-                  setResumeStyle(job.style);
+                  setResumeStyle(job.style || "CAD Technician");
                   showNotice("info", `Compiling full application packet for ${job.title} (${job.company})...`);
                   setIsBuildingFull(true);
                   try {
-                    const response = await fetch("/api/build-full-packet", {
+                    const response = await authFetch("/api/build-full-packet", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({
@@ -995,7 +1024,7 @@ export default function App() {
                   setCompanyName(job.company);
                   setJobLocation(job.location);
                   setJobPostingRaw(job.description);
-                  setResumeStyle(job.style);
+                  setResumeStyle(job.style || "CAD Technician");
                   setIsLeftPanelCollapsed(false);
                   showNotice("success", `Loaded "${job.title}" from Notion into the Application Builder!`);
                 }}
@@ -1084,7 +1113,7 @@ export default function App() {
                   <button
                     onClick={handleSavePacket}
                     className="w-full py-2 bg-slate-950 hover:bg-slate-850 text-slate-300 hover:text-white border border-slate-805 text-xs font-semibold rounded flex items-center justify-between px-3 transition-colors cursor-pointer group"
-                    title="Saves actively loaded portfolio into browser localStorage"
+                    title="Saves actively loaded portfolio into Cloud Firestore"
                   >
                     <div className="flex items-center gap-2">
                       <Bookmark className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-400" />

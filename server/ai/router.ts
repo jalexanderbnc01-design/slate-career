@@ -1,4 +1,5 @@
 import express from "express";
+import { AuthenticatedRequest } from "../firebaseStore";
 import {
   AIModelInfo,
   AIProviderAdapter,
@@ -11,8 +12,10 @@ import {
   getLiveDiscoveryState,
   getProviderConfig,
   getUsageSummary,
+  hydrateAiStoreForUser,
   recordUsageEntry,
   resetUsageLogs,
+  setAiStoreOwner,
   setLiveDiscoveryState,
   updateProviderConfig,
 } from "./store";
@@ -119,6 +122,14 @@ function buildSnapshot(adapter: AIProviderAdapter): ProviderPublicSnapshot {
 
 export function createSlateAIRouter(): express.Router {
   const router = express.Router();
+
+  router.use(async (req: AuthenticatedRequest, _res, next) => {
+    if (req.uid) {
+      setAiStoreOwner(req.uid);
+      await hydrateAiStoreForUser(req.uid);
+    }
+    next();
+  });
 
   // 1. List all providers and current configuration/connection status
   router.get("/providers", (_req, res) => {

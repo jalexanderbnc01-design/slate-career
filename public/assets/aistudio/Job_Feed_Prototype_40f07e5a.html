@@ -417,16 +417,24 @@ button { cursor: pointer; }
       perks: ["Mentorship", "Training budget", "Medical coverage"] }
   };
 
-  var FEED_STATE_KEY = "xelime-job-feed-state-v1";
-  var SAVED_JOBS_KEY = "xelime-saved-jobs-v1";
+  // Feed state is owned by the React parent (persisted to Firestore) and
+  // mirrored here in memory only. The parent restores it via a
+  // "xelime:feed-state-restore" postMessage and receives updates via
+  // "xelime:feed-state" posts from syncSavedJobs().
   var state = { tab: "recommended", filters: {}, sort: "match", liked: {}, applied: {}, hidden: {}, docs: {} };
   try {
-    var savedFeedState = JSON.parse(localStorage.getItem(FEED_STATE_KEY) || "null");
-    if (savedFeedState && typeof savedFeedState === "object") {
-      if (savedFeedState.liked) state.liked = savedFeedState.liked;
-      if (savedFeedState.applied) state.applied = savedFeedState.applied;
-      if (savedFeedState.hidden) state.hidden = savedFeedState.hidden;
-      if (savedFeedState.docs) state.docs = savedFeedState.docs;
+    window.addEventListener("message", function (event) {
+      if (event.origin !== window.location.origin || !event.data) return;
+      if (event.data.type === "xelime:feed-state-restore" && event.data.state) {
+        var restored = event.data.state;
+        if (restored.liked) state.liked = restored.liked;
+        if (restored.applied) state.applied = restored.applied;
+        if (restored.hidden) state.hidden = restored.hidden;
+        if (restored.docs) state.docs = restored.docs;
+      }
+    });
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: "xelime:feed-state-request" }, window.location.origin);
     }
   } catch (e) {}
   var current = null;
@@ -456,18 +464,13 @@ button { cursor: pointer; }
         tagline: d.tagline || ""
       };
     });
-    try {
-      localStorage.setItem(FEED_STATE_KEY, JSON.stringify({
-        liked: state.liked,
-        applied: state.applied,
-        hidden: state.hidden,
-        docs: state.docs
-      }));
-      localStorage.setItem(SAVED_JOBS_KEY, JSON.stringify(saved));
-    } catch (e) {}
     if (window.parent && window.parent !== window) {
       try {
         window.parent.postMessage({ type: "xelime:saved-jobs", jobs: saved }, window.location.origin);
+        window.parent.postMessage({
+          type: "xelime:feed-state",
+          state: { liked: state.liked, applied: state.applied, hidden: state.hidden, docs: state.docs }
+        }, window.location.origin);
       } catch (e) {}
     }
   }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { authFetch } from "../firebase/client";
 import { UserProfile } from "../types";
 import {
   ClayStatusResponse,
@@ -391,7 +392,7 @@ export default function ClayIntegration({
     setBusyAction("scan_live");
     setFeedback(null);
     try {
-      const res = await fetch("/api/search-jobs", {
+      const res = await authFetch("/api/search-jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

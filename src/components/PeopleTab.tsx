@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { getUserStoreValue, setUserStoreValue, useUserStoreReady } from "../utils/userStore";
 import { 
   Users, 
   Plus, 
@@ -37,10 +38,8 @@ interface PeopleTabProps {
 }
 
 export default function PeopleTab({ onCopyText, copiedKey }: PeopleTabProps) {
-  const [contacts, setContacts] = useState<Contact[]>(() => {
-    const saved = localStorage.getItem("jaime_contacts");
-    if (saved) return JSON.parse(saved);
-    return [
+  const storeReady = useUserStoreReady();
+  const [contacts, setContacts] = useState<Contact[]>([
       {
         id: "con-1",
         name: "Sarah Jenkins",
@@ -85,12 +84,26 @@ export default function PeopleTab({ onCopyText, copiedKey }: PeopleTabProps) {
         nextAction: "Inquire about sign drafting positions",
         notes: "Old connection. Can facilitate references for CAD-adjacent vacancies in Franklin."
       }
-    ];
-  });
+    ]
+  );
 
   useEffect(() => {
-    localStorage.setItem("jaime_contacts", JSON.stringify(contacts));
-  }, [contacts]);
+    if (!storeReady) return;
+    const saved = getUserStoreValue("jaime_contacts");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) setContacts(parsed);
+      } catch {
+        // Keep defaults on corrupt payload
+      }
+    }
+  }, [storeReady]);
+
+  useEffect(() => {
+    if (!storeReady) return;
+    setUserStoreValue("jaime_contacts", JSON.stringify(contacts));
+  }, [contacts, storeReady]);
 
   // Form states
   const [name, setName] = useState("");

@@ -1,4 +1,5 @@
 import express from "express";
+import { AuthenticatedRequest } from "../firebaseStore";
 import { NotionApiError, sanitizeNotionError } from "./client";
 import {
   autoDetectMappingsIntoStore,
@@ -9,6 +10,7 @@ import {
   getNotionDatabaseRecords,
   getNotionStatus,
   getSyncStatusSummary,
+  hydrateNotionStoreForUser,
   importFromNotion,
   listNotionDatabases,
   readNotionPage,
@@ -35,6 +37,13 @@ function handleNotionError(res: express.Response, err: unknown) {
 
 export function createNotionRouter(): express.Router {
   const router = express.Router();
+
+  router.use(async (req: AuthenticatedRequest, _res, next) => {
+    if (req.uid) {
+      await hydrateNotionStoreForUser(req.uid);
+    }
+    next();
+  });
 
   // 1. GET /api/notion/status
   router.get("/status", async (_req, res) => {
