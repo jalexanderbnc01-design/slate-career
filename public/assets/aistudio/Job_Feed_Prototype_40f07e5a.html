@@ -432,6 +432,16 @@ button { cursor: pointer; }
         if (restored.hidden) state.hidden = restored.hidden;
         if (restored.docs) state.docs = restored.docs;
       }
+      if (event.data.type === "xelime:live-jobs" && Array.isArray(event.data.jobs)) {
+        if (Array.isArray(event.data.skills) && event.data.skills.length) MY_SKILLS = event.data.skills;
+        var seen = {};
+        JOBS.forEach(function (j) { seen[j.id] = true; });
+        event.data.jobs.forEach(function (nj) {
+          if (nj && nj.id && !seen[nj.id]) { JOBS.push(nj); seen[nj.id] = true; }
+        });
+        if (JOBS.length > 60) JOBS = JOBS.slice(0, 60);
+        render();
+      }
     });
     if (window.parent && window.parent !== window) {
       window.parent.postMessage({ type: "xelime:feed-state-request" }, window.location.origin);
@@ -507,6 +517,29 @@ button { cursor: pointer; }
   }
 
   function jobById(id) { return JOBS.filter(function (j) { return j.id === id; })[0]; }
+
+  // Catalog details only exist for the six static prototype listings; live
+  // jobs merged in via "xelime:live-jobs" fall back to fields carried on the
+  // job itself so cards and the detail drawer never crash on missing data.
+  function detailFor(id) {
+    if (DETAILS[id]) return DETAILS[id];
+    var j = jobById(id) || {};
+    var lo = (j.pay && j.pay[0]) || 0, hi = (j.pay && j.pay[1]) || lo;
+    var text = j.tagline || j.summary || "";
+    return {
+      tagline: text || ("Live listing from " + (j.company || "a company") + "."),
+      market: [lo, hi],
+      reviewed: "recently",
+      role: text || "This listing was pulled from a live job search. Open the original posting for the full description.",
+      resp: [text || "Review the full posting on the source site before applying."],
+      reqs: (j.skills || []).slice(0, 8),
+      founded: "", size: "", stage: "", hq: j.loc || "", revenue: "",
+      note: "Market band estimated from the posted salary.",
+      hiring: "Applicant counts are not provided by this source.",
+      about: text,
+      perks: []
+    };
+  }
   function skillHits(j) { return j.skills.filter(function (s) { return MY_SKILLS.indexOf(s) !== -1; }); }
   function skillGaps(j) { return j.skills.filter(function (s) { return MY_SKILLS.indexOf(s) === -1; }); }
 
@@ -596,7 +629,7 @@ button { cursor: pointer; }
         '<button class="icon-btn" data-like="' + j.id + '" aria-pressed="' + !!state.liked[j.id] + '" aria-label="Save this job" title="Save">' + ICON_BM + '</button>' +
       '</div>' +
       '<div class="rec-meta">' + (j.type === "contract" ? "Contract" : "Full-time") + ' · ' + esc(j.loc) + '</div>' +
-      '<p class="rec-desc">' + esc(DETAILS[j.id].tagline) + '</p>' +
+      '<p class="rec-desc">' + esc(detailFor(j.id).tagline) + '</p>' +
       '<div class="rec-foot"><span>USD ' + mo(j.pay[0]) + ' – ' + mo(j.pay[1]) + '/month</span><span class="rec-ago">' + ago(j.ago) + '</span></div>' +
       '<button class="ai-pill" data-open="' + j.id + '">AI Match: ' + j.match + '% Match</button>' +
     '</article>';
@@ -695,7 +728,7 @@ button { cursor: pointer; }
   function li(t) { return '<li>' + esc(t) + '</li>'; }
 
   function openDetail(id) {
-    var j = jobById(id), d = DETAILS[id], lo = d.market[0], hi = d.market[1], span = hi - lo;
+    var j = jobById(id), d = detailFor(id), lo = d.market[0], hi = d.market[1], span = (hi - lo) || 1;
     var left = Math.max(0, Math.min(100, (j.pay[0] - lo) / span * 100));
     var right = Math.max(0, Math.min(100, (j.pay[1] - lo) / span * 100));
     var hits = skillHits(j), gaps = skillGaps(j);
@@ -785,14 +818,14 @@ button { cursor: pointer; }
       var jr = jobById(id); setDocIfNone(id, "resume"); closeDetail();
       say("Resume starter for " + jr.title + " at " + jr.company + ":\n" +
         "Lead with " + (skillHits(jr).join(", ") || "your design background") + ".\n" +
-        "Mirror these responsibilities: " + DETAILS[id].resp[0] + ".");
+        "Mirror these responsibilities: " + detailFor(id).resp[0] + ".");
       return;
     }
     if (b.dataset.docopen !== undefined) {
       var kind = b.dataset.docopen, jo = jobById(id);
       setDocIfNone(id, kind); closeDetail();
       say(kind === "resume"
-        ? "Tailored resume for " + jo.title + " at " + jo.company + ":\nLead with " + (skillHits(jo).join(", ") || "your design background") + ".\nMirror this responsibility: " + DETAILS[id].resp[0] + "."
+        ? "Tailored resume for " + jo.title + " at " + jo.company + ":\nLead with " + (skillHits(jo).join(", ") || "your design background") + ".\nMirror this responsibility: " + detailFor(id).resp[0] + "."
         : "Cover letter draft for " + jo.title + " at " + jo.company + ":\nI'm applying for the " + jo.title + " role at " + jo.company + ". My work in " + (skillHits(jo).join(", ") || "design and visualization") + " fits what you're looking for.");
       return;
     }

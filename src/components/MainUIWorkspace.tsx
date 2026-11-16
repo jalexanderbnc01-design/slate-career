@@ -1,6 +1,7 @@
 import React, { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { getUserStoreValue, setUserStoreValue, useUserStoreReady } from '../utils/userStore';
 import { authFetch } from '../firebase/client';
+import type { JobFixture } from '../types';
 import {
   Activity,
   ArrowDownRight,
@@ -2290,21 +2291,135 @@ function SettingsPage(c: ViewContext) {
   );
 }
 
+type FeedJob = {
+  id: string;
+  title: string;
+  company: string;
+  logo: string;
+  color: string;
+  sector: string;
+  loc: string;
+  remote: string;
+  type: 'fulltime' | 'contract';
+  level: string;
+  pay: [number, number];
+  years: string;
+  ago: number;
+  applicants: number;
+  alumni: number;
+  sponsor: boolean;
+  skills: string[];
+  match: number;
+  tagline?: string;
+  summary?: string;
+};
+
+const LIVE_JOBS_STORE = 'xelime-live-jobs-v1';
+const LIVE_SEARCH_QUERY = 'creative production, CAD drafting, print shop, remote support';
+const LIVE_SEARCH_LOCATION = 'Columbus, OH';
+const FEED_COLORS = ['#e11d1d', '#0ea5b7', '#1d4ed8', '#7c3aed', '#059669', '#d97706', '#db2777', '#2563eb'];
+
+function collectUserSkillNames(): Set<string> {
+  const out = new Set<string>();
+  try {
+    const raw = getUserStoreValue(STORE);
+    if (raw) {
+      const ws = JSON.parse(raw);
+      (Array.isArray(ws?.skills) ? ws.skills : []).forEach((s: AnyRecord | string) => {
+        if (typeof s === 'string') out.add(s.toLowerCase());
+        else if (s?.name) out.add(String(s.name).toLowerCase());
+      });
+    }
+  } catch {
+    // Ignore corrupt workspace data
+  }
+  return out;
+}
+
+function parseSalaryToK(salary: string): [number, number] {
+  const text = (salary || '').toLowerCase();
+  const nums = (text.match(/\d[\d,]*(?:\.\d+)?/g) || [])
+    .map((n) => parseFloat(n.replace(/,/g, '')))
+    .filter((n) => n > 0);
+  if (!nums.length) return [0, 0];
+  const mult = /(hour|hr)/.test(text) ? 2080 : /month/.test(text) ? 12 : 1000;
+  const values = nums.slice(0, 2).map((n) => Math.max(1, Math.round((n * mult) / 1000)));
+  const lo = Math.min(...values);
+  const hi = Math.max(...values);
+  return hi === lo ? [lo, lo + 10] : [lo, hi];
+}
+
+function toFeedJob(job: JobFixture, index: number, userSkills: Set<string>): FeedJob {
+  const skills = (job.skills || []).slice(0, 6);
+  const hits = skills.filter((s) => userSkills.has(String(s).toLowerCase())).length;
+  const match = skills.length ? Math.max(15, Math.round((hits / skills.length) * 100)) : 50;
+  const remote =
+    job.remoteType === 'remote' ? 'Remote' : job.remoteType === 'hybrid' ? 'Hybrid' : 'Onsite';
+  const level = /sen|lead|principal|staff/i.test(job.experienceLevel || '')
+    ? 'senior'
+    : /entry|junior/i.test(job.experienceLevel || '')
+      ? 'entry'
+      : 'mid';
+  const posted = job.postedAt ? Date.parse(job.postedAt) : NaN;
+  const ago = Number.isFinite(posted) ? Math.max(0.5, (Date.now() - posted) / 3600000) : 24;
+  return {
+    id: 'live-' + job.id,
+    title: job.title || 'Untitled role',
+    company: job.company || 'Unknown company',
+    logo: (job.company || '?').trim().charAt(0).toUpperCase(),
+    color: FEED_COLORS[index % FEED_COLORS.length],
+    sector: job.source ? `${job.source} · Live search` : 'Live search',
+    loc: job.location || '—',
+    remote,
+    type: /contract|temp|part-time/i.test(`${job.experienceLevel || ''} ${job.lane || ''}`)
+      ? 'contract'
+      : 'fulltime',
+    level,
+    pay: parseSalaryToK(job.salary || ''),
+    years: job.experienceLevel || '—',
+    ago,
+    applicants: 0,
+    alumni: 0,
+    sponsor: false,
+    skills,
+    match,
+    tagline: job.summary || '',
+    summary: job.summary || (job.description || '').slice(0, 400),
+  };
+}
+
 function JobFeedPrototypePanel({ theme }: { theme: 'light' | 'dark' }) {
   const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
   const [frameKey, setFrameKey] = useState(0);
+  const [fetchingLive, setFetchingLive] = useState(false);
+  const [liveStatus, setLiveStatus] = useState<string | null>(null);
   const storeReady = useUserStoreReady();
 
   const restoreFeedState = React.useCallback(() => {
     const raw = getUserStoreValue('xelime-job-feed-state-v1');
-    if (!raw) return;
-    try {
-      iframeRef.current?.contentWindow?.postMessage(
-        { type: 'xelime:feed-state-restore', state: JSON.parse(raw) },
-        window.location.origin
-      );
-    } catch {
-      // Ignore corrupt feed state
+    if (raw) {
+      try {
+        iframeRef.current?.contentWindow?.postMessage(
+          { type: 'xelime:feed-state-restore', state: JSON.parse(raw) },
+          window.location.origin
+        );
+      } catch {
+        // Ignore corrupt feed state
+      }
+    }
+    const liveRaw = getUserStoreValue(LIVE_JOBS_STORE);
+    if (liveRaw) {
+      try {
+        const jobs = JSON.parse(liveRaw);
+        if (Array.isArray(jobs) && jobs.length) {
+          iframeRef.current?.contentWindow?.postMessage(
+            { type: 'xelime:live-jobs', jobs },
+            window.location.origin
+          );
+        }
+      } catch {
+        // Ignore corrupt live jobs
+      }
     }
   }, []);
 
@@ -2323,6 +2438,42 @@ function JobFeedPrototypePanel({ theme }: { theme: 'light' | 'dark' }) {
     if (!storeReady) return;
     restoreFeedState();
   }, [frameKey, storeReady, restoreFeedState]);
+
+  const fetchLiveJobs = React.useCallback(async () => {
+    if (fetchingLive) return;
+    setFetchingLive(true);
+    setLiveStatus(null);
+    try {
+      const userSkills = collectUserSkillNames();
+      const res = await authFetch('/api/search-jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: LIVE_SEARCH_QUERY,
+          location: LIVE_SEARCH_LOCATION,
+          source: 'auto',
+        }),
+      });
+      if (!res.ok) throw new Error(`Live job search failed (${res.status}).`);
+      const payload = await res.json();
+      const fixtures: JobFixture[] = Array.isArray(payload?.jobs) ? payload.jobs : [];
+      if (!fixtures.length) {
+        setLiveStatus('No live jobs returned. Add a provider key in Settings → APIs or try again later.');
+        return;
+      }
+      const mapped = fixtures.slice(0, 40).map((job, index) => toFeedJob(job, index, userSkills));
+      setUserStoreValue(LIVE_JOBS_STORE, JSON.stringify(mapped));
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: 'xelime:live-jobs', jobs: mapped, skills: [...userSkills] },
+        window.location.origin
+      );
+      setLiveStatus(`Added ${mapped.length} live jobs to the feed.`);
+    } catch (err) {
+      setLiveStatus(err instanceof Error ? err.message : 'Live job search failed.');
+    } finally {
+      setFetchingLive(false);
+    }
+  }, [fetchingLive]);
 
   const syncTheme = (nextTheme: 'light' | 'dark') => {
     try {
@@ -2348,6 +2499,15 @@ function JobFeedPrototypePanel({ theme }: { theme: 'light' | 'dark' }) {
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <Action
               secondary
+              icon={<Sparkles size={15} />}
+              onClick={() => {
+                void fetchLiveJobs();
+              }}
+            >
+              {fetchingLive ? 'Searching…' : 'Fetch live jobs'}
+            </Action>
+            <Action
+              secondary
               icon={<RefreshCw size={15} />}
               onClick={() => setFrameKey((k) => k + 1)}
             >
@@ -2365,12 +2525,18 @@ function JobFeedPrototypePanel({ theme }: { theme: 'light' | 'dark' }) {
           </div>
         }
       />
+      {liveStatus && (
+        <p style={{ margin: '8px 0 0', fontSize: '13px', color: 'hsl(var(--muted-foreground))' }}>
+          {liveStatus}
+        </p>
+      )}
       <div
         style={{
           border: '1px solid hsl(var(--border))',
           borderRadius: '12px',
           overflow: 'hidden',
           background: 'hsl(var(--card))',
+          marginTop: '12px',
         }}
       >
         <iframe
