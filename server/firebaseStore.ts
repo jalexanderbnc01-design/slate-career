@@ -87,10 +87,15 @@ export async function verifyFirebaseIdToken(token: string): Promise<{
   emailVerified: boolean;
 }> {
   const decoded = await adminAuth.verifyIdToken(token);
+  const signInProvider = (decoded.firebase as { sign_in_provider?: string } | undefined)?.sign_in_provider || "";
+  // Federated Google accounts are email-verified by Google itself, but the
+  // emailVerified flag on the Firebase user record lags behind for
+  // credential-based (GIS) sign-ins. Trust Google-issued credentials.
+  const verifiedByGoogleProvider = signInProvider === "google.com" && Boolean(decoded.email);
   return {
     uid: decoded.uid,
     email: decoded.email,
-    emailVerified: Boolean(decoded.email_verified),
+    emailVerified: Boolean(decoded.email_verified) || verifiedByGoogleProvider,
   };
 }
 
