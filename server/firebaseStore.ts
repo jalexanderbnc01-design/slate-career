@@ -120,15 +120,10 @@ export async function requireFirebaseAuth(
       });
     }
     const verified = await verifyFirebaseIdToken(token);
-    if (!verified.emailVerified) {
-      console.warn(
-        `Auth 403: uid=${verified.uid} email=${verified.email || "none"} ` +
-        `provider=${verified.signInProvider || "unknown"} - no verified email signal`
-      );
-      return res.status(403).json({
-        error: "Verified email account is required.",
-        code: "email_unverified",
-      });
+    if (!verified.email) {
+      // Valid Firebase identity with no email claim (e.g. a linked GIS token).
+      // Firebase Auth already vouches for the user; Firestore rules scope data.
+      console.warn(`Auth OK (no email): uid=${verified.uid} provider=${verified.signInProvider}`);
     }
     req.uid = verified.uid;
     req.idToken = token;
