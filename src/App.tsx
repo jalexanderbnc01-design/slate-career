@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { UserProfile, JobAnalysis, ResumeData, CoverLetterData, ChecklistItem, ApplicationPacket } from "./types";
 import { defaultProfile } from "./defaultProfile";
 import { authFetch } from "./firebase/client";
@@ -60,6 +60,50 @@ export default function App() {
   const [showMainUI, setShowMainUI] = useState(false);
   const [isIntelligenceOpen, setIsIntelligenceOpen] = useState(false);
   const [isIntelligenceMinimized, setIsIntelligenceMinimized] = useState(false);
+
+  // Settings popup (served from public/settings-prototype.html)
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const settingsDialogRef = useRef<HTMLDivElement | null>(null);
+  const settingsIframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSettingsOpen(false);
+    };
+    const onMessage = (e: MessageEvent) => {
+      if (e.data && e.data.type === "career-engine:settings-close") {
+        setSettingsOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("message", onMessage);
+    settingsDialogRef.current?.focus();
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("message", onMessage);
+      settingsButtonRef.current?.focus();
+    };
+  }, [settingsOpen]);
+
+  // Same-origin: attach an Escape listener inside the settings page that asks the
+  // parent to close. Attaching at runtime keeps the prototype file untouched.
+  const handleSettingsFrameLoad = () => {
+    const win = settingsIframeRef.current?.contentWindow;
+    if (!win) return;
+    win.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        win.parent.postMessage({ type: "career-engine:settings-close" }, window.location.origin);
+      }
+    });
+  };
 
   // Active inputs
   const [jobTitle, setJobTitle] = useState("CAD Technical Drafter");
@@ -594,6 +638,18 @@ export default function App() {
               <span>{feedbackMsg.text}</span>
             </div>
           )}
+
+          <button
+            ref={settingsButtonRef}
+            onClick={() => setSettingsOpen(true)}
+            aria-label="Settings"
+            aria-haspopup="dialog"
+            aria-expanded={settingsOpen}
+            title="Settings"
+            className="p-2 rounded-md border border-orange-500/70 bg-slate-900 hover:bg-slate-800 text-orange-400 hover:text-orange-300 transition-colors cursor-pointer"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
 
           <div className="text-[10px] bg-slate-800 border border-slate-750 rounded px-2.5 py-1 font-mono text-slate-350 flex items-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
@@ -1282,6 +1338,46 @@ export default function App() {
           savedPacketsCount={savedPackets.length}
         />
       </FloatingIntelligenceWindow>
+
+      {settingsOpen && (
+        <div
+          className="fixed inset-0 z-[100] bg-slate-950/70 flex items-center justify-center sm:p-6"
+          role="presentation"
+          onClick={() => setSettingsOpen(false)}
+        >
+          <div
+            ref={settingsDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Settings"
+            tabIndex={-1}
+            onClick={(e) => e.stopPropagation()}
+            className="outline-none bg-slate-900 border border-slate-800 rounded-none sm:rounded-lg shadow-2xl overflow-hidden w-full h-full sm:w-[920px] sm:max-w-[95vw] sm:h-[80vh] flex flex-col"
+          >
+            <div className="flex items-center justify-between pl-4 pr-2 py-2 border-b border-slate-800 bg-slate-900 shrink-0">
+              <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200 flex items-center gap-2">
+                <Settings className="w-4 h-4 text-orange-400" />
+                Settings
+              </span>
+              <button
+                onClick={() => setSettingsOpen(false)}
+                aria-label="Close settings"
+                title="Close settings"
+                className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer text-lg leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <iframe
+              ref={settingsIframeRef}
+              src="/settings-prototype.html"
+              title="Settings"
+              onLoad={handleSettingsFrameLoad}
+              className="flex-1 w-full bg-slate-950"
+            />
+          </div>
+        </div>
+      )}
     </>
   );
 }
