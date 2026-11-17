@@ -106,11 +106,11 @@ export default function InterviewPrepTab({
   const [negotiationTarget, setNegotiationTarget] = useState<string>("22.50");
 
   const job = selectedJob || {
-    title: "Graphics Pre-press Assistant",
-    company: "Buckeye Print & Sign Company",
-    lane: "Lane B — Creative Production",
-    skills: ["Illustrator", "Photoshop", "Vinyl", "Pre-press"],
-    description: "Prepare graphics files, organize layer sheets, check vinyl layouts, and operate screen mesh separations."
+    title: "",
+    company: "",
+    lane: "",
+    skills: [],
+    description: ""
   };
 
   const getLocalWhyFitsMe = (targetJob: typeof job) => {

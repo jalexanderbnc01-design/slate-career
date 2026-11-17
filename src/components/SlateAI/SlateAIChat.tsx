@@ -336,7 +336,7 @@ export default function SlateAIChat({
   userProfile,
   careerContextSummary,
   activeJob,
-  profileName = "Alex Mercer",
+  profileName = "Applicant",
   profileSkills = [],
   profileSoftware = [],
   savedPacketsCount = 0,

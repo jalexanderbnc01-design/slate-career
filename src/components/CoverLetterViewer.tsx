@@ -6,9 +6,10 @@ interface CoverLetterViewerProps {
   coverLetter: CoverLetterData | null;
   isLoading: boolean;
   onUpdate: (coverLetter: CoverLetterData) => void;
+  applicantName?: string;
 }
 
-export default function CoverLetterViewer({ coverLetter, isLoading, onUpdate }: CoverLetterViewerProps) {
+export default function CoverLetterViewer({ coverLetter, isLoading, onUpdate, applicantName = "" }: CoverLetterViewerProps) {
   const [copied, setCopied] = useState(false);
   const [localLetter, setLocalLetter] = useState<CoverLetterData | null>(null);
 
@@ -171,7 +172,7 @@ export default function CoverLetterViewer({ coverLetter, isLoading, onUpdate }: 
             </div>
             
             <div className="font-bold text-slate-100 border-t border-slate-805 pt-1.5 pr-8 font-sans">
-              Alex Mercer
+              {applicantName}
               <span className="block text-[10px] text-slate-400 font-normal mt-0.5">Applicant of CAD / Specialist Architect Roles</span>
             </div>
           </div>

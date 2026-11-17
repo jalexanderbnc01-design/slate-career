@@ -39,53 +39,7 @@ interface PeopleTabProps {
 
 export default function PeopleTab({ onCopyText, copiedKey }: PeopleTabProps) {
   const storeReady = useUserStoreReady();
-  const [contacts, setContacts] = useState<Contact[]>([
-      {
-        id: "con-1",
-        name: "Sarah Jenkins",
-        company: "Buckeye Print & Sign",
-        role: "Lead Pre-press Architect",
-        source: "Walk-in",
-        lastContact: "2026-06-01",
-        warmth: "Hot",
-        nextAction: "Drop off apparel separations sample",
-        notes: "Met Sarah during walk-in routing. Super friendly. Impressed by local drafting background!"
-      },
-      {
-        id: "con-2",
-        name: "Marcus Clay",
-        company: "Rogue Apparel Printing",
-        role: "Creative Lead",
-        source: "Instagram",
-        lastContact: "2026-05-28",
-        warmth: "Warm",
-        nextAction: "DM link to screen-print kit",
-        notes: "Replied to their screen printing story. He likes low-drama vector layout people."
-      },
-      {
-        id: "con-3",
-        name: "Elena Cruz",
-        company: "Green Releaf Dispensary",
-        role: "Inventory & POS Director",
-        source: "Walk-in",
-        lastContact: "2026-06-02",
-        warmth: "Hot",
-        nextAction: "Drop off printed application sheet",
-        notes: "Gave verbal approval. Told me to swing back with standard paper form."
-      },
-      {
-        id: "con-4",
-        name: "Devin O'Hara",
-        company: "Ohio CAD Drafters Group",
-        role: "Civil Engineering Supervisor",
-        source: "LinkedIn",
-        lastContact: "2026-05-15",
-        warmth: "Cold",
-        nextAction: "Inquire about sign drafting positions",
-        notes: "Old connection. Can facilitate references for CAD-adjacent vacancies in Franklin."
-      }
-    ]
-  );
+  const [contacts, setContacts] = useState<Contact[]>([]);
 
   useEffect(() => {
     if (!storeReady) return;

@@ -77,10 +77,10 @@ export default function MessagesTab({
   const [optimizingTypes, setOptimizingTypes] = useState<Record<string, boolean>>({});
 
   const job = selectedJob || {
-    title: "Graphics Pre-press Assistant",
-    company: "Buckeye Print & Sign Company",
-    lane: "Lane B",
-    skills: ["Illustrator", "Photoshop", "Pre-press"]
+    title: "",
+    company: "",
+    lane: "",
+    skills: []
   };
 
   // Find related contact person, if saved in trackerRows

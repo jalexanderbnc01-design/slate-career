@@ -825,9 +825,10 @@ app.post("/api/search-jobs", requireFirebaseAuth, async (req: AuthenticatedReque
   try {
     const { query, location = "Columbus, OH", source = "auto", remoteOnly = false } = req.body;
     const cleanQuery = (query || "creative production, print shop, CAD design, remote support").trim();
+    let liveResult: Awaited<ReturnType<typeof searchLiveJobProviders>> | null = null;
 
     if (source !== "ai_scan") {
-      const liveResult = await searchLiveJobProviders(
+      liveResult = await searchLiveJobProviders(
         {
           query: cleanQuery,
           location,
@@ -863,72 +864,15 @@ app.post("/api/search-jobs", requireFirebaseAuth, async (req: AuthenticatedReque
       }
     }
 
-    // AI Market Scan (explicit ai_scan or auto fallback when external HTTP feeds return 0 matches)
-    const aiClient = getAIClient();
-
-    const prompt = `
-      You are an expert Ohio recruiter scanning the Central Ohio job market (Franklin County, Columbus and surrounding metros) for Jaime.
-      Produce a list of exactly 5 highly-realistic, professional job opportunities matching the user query: "${cleanQuery}"
-      ALL results must be explicitly set in ${location} or remote for Ohio residents.
-      
-      Align candidates with four specific lanes:
-      1. Lane A: Fast money / lower THC-risk (Retail, Restaurant, Dispensary Agent, Remote Customer Support/Call Center, Front Desk receptionist, low drug-test risk, low stress)
-      2. Lane B: Creative production (Print Shop designer, Sign Shop layout artist, Custom Apparel Graphics, Screen Printing assistant, Content Designer, Social Media helper)
-      3. Lane C: Creative Tech / 3D / AI (Blender product modeling, clothing mockup artist, AI visual designer, 3D worldbuilding/rendering)
-      4. Lane D: CAD-adjacent but not engineering-heavy (Retail store space designer, exhibit/booth draft assistant, furniture detailer, interior design CAD technician)
-
-      Avoid safety-sensitive positions (CDL, heavy manufacturing, construction field work).
-      For each job, generate a detailed description (at least 150 words) with clear responsibilities, qualifications, and tools involved.
-
-      Return a JSON array of objects matching:
-      - id: unique string starting with "col-g-"
-      - title: job title
-      - company: realistic company name
-      - location: must be in Columbus, OH or Remote
-      - salary: estimated salary
-      - experienceLevel: text
-      - skills: array of 4-6 technical or soft skills
-      - summary: 1-sentence quick snapshot summary
-      - description: complete highly detailed job posting text
-    `;
-
-    const response = await aiClient.models.generateContent({
-      model: "gemini-4-hydrogen",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            required: ["id", "title", "company", "location", "salary", "experienceLevel", "skills", "summary", "description"],
-            properties: {
-              id: { type: Type.STRING },
-              title: { type: Type.STRING },
-              company: { type: Type.STRING },
-              location: { type: Type.STRING },
-              salary: { type: Type.STRING },
-              experienceLevel: { type: Type.STRING },
-              skills: { type: Type.ARRAY, items: { type: Type.STRING } },
-              summary: { type: Type.STRING },
-              description: { type: Type.STRING }
-            }
-          }
-        }
-      }
-    });
-
-    const results = JSON.parse(response.text || "[]").map((j: any) => ({
-      ...j,
-      source: "AI Market Scan",
-    }));
+    // No fabricated fallback: when live providers return nothing, report
+    // an honest empty result instead of AI-generated fake listings.
     res.json({
-      jobs: results,
+      jobs: [],
       meta: {
-        providersUsed: ["AI Market Scan"],
+        providersUsed: liveResult?.providersUsed || [],
         cached: false,
-        errors: [],
-        fallbackUsed: source !== "ai_scan",
+        errors: liveResult?.errors || [],
+        fallbackUsed: false,
       },
     });
   } catch (error: any) {

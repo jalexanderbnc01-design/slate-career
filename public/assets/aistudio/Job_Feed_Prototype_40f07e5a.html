@@ -324,98 +324,12 @@ button { cursor: pointer; }
 <script>
 (function () {
   // Example listings. Match is a 0–100 score based on the skill tags.
-  var MY_SKILLS = ["Civil 3D", "Revit", "Blender", "AutoCAD", "BIM", "Unreal Engine", "Three.js"];
+  var MY_SKILLS = []; // Seeded by the parent app together with live jobs.
 
-  var JOBS = [
-    { id: 1, title: "Sr Designer, Frame.io", company: "Adobe", logo: "A", color: "#e11d1d",
-      sector: "Artificial Intelligence (AI) · Consulting · Public Company",
-      loc: "California, United States", remote: "Remote", type: "fulltime", level: "senior",
-      pay: [117, 228], years: "5+ years", ago: 0.8, applicants: 25, alumni: 4, sponsor: true,
-      skills: ["Blender", "Three.js", "Unreal Engine", "Figma", "Motion"], match: 63 },
-    { id: 2, title: "Senior Product Designer", company: "TimelyCare", logo: "T", color: "#0ea5b7",
-      sector: "Email · Health Care · Growth Stage",
-      loc: "Ft. Worth, TX", remote: "Remote", type: "fulltime", level: "senior",
-      pay: [108, 120], years: "7+ years", ago: 2, applicants: 40, alumni: 0, sponsor: false,
-      skills: ["Figma", "Revit", "User Research", "Prototyping"], match: 66 },
-    { id: 3, title: "BIM Coordinator (Civil)", company: "Burgess & Niple", logo: "B", color: "#1d4ed8",
-      sector: "Civil Engineering · Architecture · Private",
-      loc: "Columbus, OH", remote: "Hybrid", type: "fulltime", level: "mid",
-      pay: [78, 96], years: "3+ years", ago: 5, applicants: 12, alumni: 2, sponsor: false,
-      skills: ["Civil 3D", "Revit", "AutoCAD", "BIM", "Navisworks"], match: 91 },
-    { id: 4, title: "3D Visualization Artist", company: "Studio Lumen", logo: "S", color: "#7c3aed",
-      sector: "Architecture Visualization · Small Business",
-      loc: "Columbus, OH", remote: "Onsite", type: "contract", level: "mid",
-      pay: [45, 60], years: "2+ years", ago: 12, applicants: 8, alumni: 0, sponsor: false,
-      skills: ["Blender", "Unreal Engine", "Three.js", "Lighting"], match: 88 },
-    { id: 5, title: "Digital Twin Engineer", company: "Vantage Infrastructure", logo: "V", color: "#059669",
-      sector: "Infrastructure · Engineering Services · Public Company",
-      loc: "Remote, US", remote: "Remote", type: "fulltime", level: "senior",
-      pay: [130, 165], years: "5+ years", ago: 20, applicants: 60, alumni: 1, sponsor: true,
-      skills: ["Revit", "Unreal Engine", "Three.js", "GIS", "Python"], match: 79 },
-    { id: 6, title: "Junior CAD Technician", company: "Meridian Site Design", logo: "M", color: "#b45309",
-      sector: "Land Development · Civil Engineering",
-      loc: "Dublin, OH", remote: "Onsite", type: "fulltime", level: "junior",
-      pay: [42, 52], years: "0–2 years", ago: 30, applicants: 3, alumni: 0, sponsor: false,
-      skills: ["AutoCAD", "Civil 3D", "Drafting"], match: 72 }
-  ];
+  var JOBS = []; // Seeded prototype listings removed; feed is populated only by live jobs.
 
   // Detail content for each job. Example data for the prototype.
-  var DETAILS = {
-    1: { tagline: "Design review and motion tools for video teams.", reviewed: "2d ago",
-      role: "You will design interface and motion features for Frame.io, a video review platform used by production teams. You will work with product managers, engineers, and researchers to ship features that stay simple under deadline pressure.",
-      resp: ["Lead interface and motion design for review workflows", "Build 3D and motion prototypes for product demos", "Partner with engineering on design system components"],
-      reqs: ["5+ years in product or motion design", "Strong Blender or Unreal Engine prototyping", "Experience with design systems and accessibility"],
-      founded: 1982, size: "10,000+ employees", stage: "Public company", hq: "San Jose, CA", revenue: "$20B+ (FY)",
-      about: "Adobe builds creative and document software. Frame.io is its video review and collaboration product.",
-      market: [110, 240], note: "The posted range sits in the upper half of the market band for senior designers.",
-      hiring: "Steady hiring in creative tools, with several open design roles on the team.",
-      perks: ["Equity", "Learning stipend", "Hybrid-friendly schedule"] },
-    2: { tagline: "Virtual health and wellness for students.", reviewed: "5h ago",
-      role: "You will own design for student-facing care flows, from booking to follow-up. You will work closely with research and clinical teams to make care easy to reach.",
-      resp: ["Own end-to-end design for student-facing flows", "Run usability research with students and clinicians", "Set patterns for the shared component library"],
-      reqs: ["7+ years in product design", "Experience designing for health or regulated products", "Strong research and prototyping skills in Figma"],
-      founded: 2013, size: "500–1,000 employees", stage: "Growth stage, private", hq: "Ft. Worth, TX", revenue: "Private, not disclosed",
-      about: "TimelyCare runs virtual health and wellness services for colleges and universities.",
-      market: [105, 135], note: "The posted range is near the market median.",
-      hiring: "A growing team. Design hires open a few times a year.",
-      perks: ["Health coverage", "Remote work", "Annual learning budget"] },
-    3: { tagline: "Civil and BIM coordination for infrastructure projects.", reviewed: "1d ago",
-      role: "You will coordinate Civil 3D and Revit models across project teams and keep them clean for construction. You will lead model reviews and help project leads meet delivery dates.",
-      resp: ["Coordinate Civil 3D and Revit models across project teams", "Run clash detection and model QA", "Support project leads on deliverables and standards"],
-      reqs: ["3+ years in Civil 3D and Revit", "Experience running clash detection in Navisworks", "Familiarity with AutoCAD and BIM standards"],
-      founded: 1960, size: "1,000–5,000 employees", stage: "Private, employee-owned", hq: "Columbus, OH", revenue: "Private, not disclosed",
-      about: "A regional engineering and architecture firm with civil, transportation, and water projects across Ohio.",
-      market: [72, 100], note: "The posted range is mid-band. Civil 3D and Revit experience moves you toward the top.",
-      hiring: "Local demand for BIM staff is steady. Roles like this usually fill in about six weeks.",
-      perks: ["Medical and dental", "Retirement match", "Paid certifications"] },
-    4: { tagline: "Architectural renderings and walkthroughs.", reviewed: "3d ago",
-      role: "You will build 3D scenes for client projects, from lighting and materials to real-time walkthroughs. You will work directly with the studio owner on schedule and quality.",
-      resp: ["Produce Blender and Unreal scenes for client projects", "Handle lighting, materials, and camera work", "Deliver stills and real-time walkthroughs on schedule"],
-      reqs: ["2+ years of Blender or Unreal production", "A portfolio of architectural renders", "Comfort with lighting, materials, and camera work"],
-      founded: 2016, size: "11–50 employees", stage: "Small business", hq: "Columbus, OH", revenue: "Private, not disclosed",
-      about: "A small studio that makes architectural renderings and walkthroughs for developers and design firms.",
-      market: [42, 66], note: "The contract rate is in line with the market for mid-level artists.",
-      hiring: "A small team. Contract work is posted when projects come in.",
-      perks: ["Flexible hours", "Portfolio credit", "Possible move to full time"] },
-    5: { tagline: "Digital twins for public infrastructure.", reviewed: "1w ago",
-      role: "You will build digital twin models that connect design data, GIS, and real-time engines for public agency clients. You will lead technical reviews and set up data pipelines.",
-      resp: ["Build digital twin models linking Revit, GIS, and real-time engines", "Set up data pipelines for asset tracking", "Lead technical reviews for client deliveries"],
-      reqs: ["5+ years in digital engineering or BIM", "Experience with Revit and GIS data", "Python scripting for data pipelines"],
-      founded: 1998, size: "5,000+ employees", stage: "Public company", hq: "Denver, CO", revenue: "$3B+ (FY)",
-      about: "An engineering services firm that delivers infrastructure design and digital twin platforms for public agencies.",
-      market: [125, 170], note: "The posted range is at the high end for this level, which fits public-company pay.",
-      hiring: "Strong demand for digital twin skills, with several open roles across regions.",
-      perks: ["Equity plan", "Remote option", "Tuition support"] },
-    6: { tagline: "Site design and drafting for land development.", reviewed: "4d ago",
-      role: "You will draft site plans and grading sets for residential and commercial projects. You will learn the design process while updating drawings after review comments.",
-      resp: ["Draft site plans and grading in AutoCAD and Civil 3D", "Update drawing sets after review comments", "Learn the design process alongside senior staff"],
-      reqs: ["Working knowledge of AutoCAD", "Civil 3D coursework or experience is a plus", "Attention to detail and clear communication"],
-      founded: 2004, size: "51–200 employees", stage: "Private", hq: "Dublin, OH", revenue: "Private, not disclosed",
-      about: "A land development and site design firm working on residential and commercial projects.",
-      market: [40, 55], note: "This is an entry-level range. Civil 3D experience is a plus.",
-      hiring: "Few applicants so far. The team is hiring to keep up with project load.",
-      perks: ["Mentorship", "Training budget", "Medical coverage"] }
-  };
+  var DETAILS = {}; // Seed catalog removed along with the prototype listings.
 
   // Feed state is owned by the React parent (persisted to Firestore) and
   // mirrored here in memory only. The parent restores it via a

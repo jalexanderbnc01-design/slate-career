@@ -334,13 +334,7 @@ export default function ColumbusJobFinder({
   };
 
   // Company Targets state (Firestore-backed via userStore)
-  const [companyTargets, setCompanyTargets] = useState<TargetCompany[]>([
-      { id: "comp-1", name: "Buckeye Print & Sign Shop", category: "Print Shop", location: "Columbus, OH (On-site)", status: "Targeted", contactPerson: "Sarah Jenkins (Shop Manager)", notes: "Full service vinyl plotters and screen printing rigs." },
-      { id: "comp-2", name: "FastSigns Arena District", category: "Sign Shop", location: "Columbus, OH (On-site)", status: "Contacted", contactPerson: "Tom Vance (Owner)", notes: "City zoning drawing projects. Uses Illustrator & AutoCAD." },
-      { id: "comp-3", name: "Rogue Apparel Printing", category: "Screen Printing", location: "Columbus, OH (Hybrid)", status: "Targeted", contactPerson: "Marcus Clay (Creative Lead)", notes: "Vibrant local clothes branding and custom vector prep." },
-      { id: "comp-4", name: "Green Releaf Dispensary", category: "Dispensary", location: "Columbus, OH (On-site)", status: "Targeted", contactPerson: "Elena Cruz (Inventory Director)", notes: "POS cashier + customer care role. Fully low testing risk." }
-    ]
-  );
+  const [companyTargets, setCompanyTargets] = useState<TargetCompany[]>([]);
 
   // Daily Missions targets state (Firestore-backed via userStore)
   const [dailyMissions, setDailyMissions] = useState<{ id: string; label: string; completed: boolean }[]>([

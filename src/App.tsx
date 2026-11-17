@@ -471,7 +471,7 @@ export default function App() {
       coverLetter.bodyParagraphs.forEach(p => textStr += `${p}\n\n`);
       textStr += `${coverLetter.closing}\n\n`;
       textStr += `${coverLetter.signoff}\n`;
-      textStr += `Alex Mercer\n`;
+      textStr += `${profile.name}\n`;
       textStr += `--------------------------------------------------\n\n`;
     }
 
@@ -517,7 +517,7 @@ export default function App() {
       mdStr += `Dear ${coverLetter.recipientName},\n\n`;
       coverLetter.bodyParagraphs.forEach(p => mdStr += `${p}\n\n`);
       mdStr += `*${coverLetter.closing}*\n\n`;
-      mdStr += `${coverLetter.signoff}\n\n**Alex Mercer**\n`;
+      mdStr += `${coverLetter.signoff}\n\n**${profile.name}**\n`;
     }
 
     const blob = new Blob([mdStr], { type: "text/markdown;charset=utf-8" });
@@ -1051,6 +1051,7 @@ export default function App() {
                 coverLetter={coverLetter}
                 isLoading={isBuildingCoverLetter || isBuildingFull}
                 onUpdate={setCoverLetter}
+                applicantName={profile.name}
               />
             )}
             {activeTab === "steps" && (
