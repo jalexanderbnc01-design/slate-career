@@ -6,6 +6,38 @@ import {
   actorDeleteDoc,
   hashToFirestoreId,
 } from "./firebaseStore";
+import { getUserServiceKeys } from "./serviceKeys";
+
+// Per-user key overrides: settings-page keys fill the gap when the matching
+// env var is absent. An env key always wins when both exist.
+export interface UserKeyOverrides {
+  jsearch?: string;
+  adzunaId?: string;
+  adzunaKey?: string;
+  jooble?: string;
+  usajobs?: string;
+  usajobsEmail?: string;
+}
+
+export async function loadUserKeyOverrides(
+  actor?: FirestoreActor
+): Promise<UserKeyOverrides> {
+  if (!actor?.uid) return {};
+  try {
+    const keys = await getUserServiceKeys(actor);
+    return {
+      jsearch: keys.jsearch?.key,
+      adzunaId: keys.adzuna?.key,
+      adzunaKey: keys.adzuna?.extra,
+      jooble: keys.jooble?.key,
+      usajobs: keys.usajobs?.key,
+      usajobsEmail: keys.usajobs?.extra,
+    };
+  } catch (err) {
+    console.warn("User key overrides read failed:", err);
+    return {};
+  }
+}
 
 export interface NormalizedJobListing {
   id: string;
@@ -446,8 +478,8 @@ export function getJobSourcesStatus(): JobSourceStatus[] {
 
 // ======================== INDIVIDUAL PROVIDER FETCHERS ========================
 
-async function fetchFromJSearch(query: string, location: string, remoteOnly: boolean): Promise<NormalizedJobListing[]> {
-  const key = process.env.RAPIDAPI_KEY;
+async function fetchFromJSearch(query: string, location: string, remoteOnly: boolean, overrides: UserKeyOverrides = {}): Promise<NormalizedJobListing[]> {
+  const key = process.env.RAPIDAPI_KEY || overrides.jsearch;
   if (!key) return [];
 
   const q = remoteOnly ? `${query} remote` : `${query} in ${location}`;
@@ -493,9 +525,9 @@ async function fetchFromJSearch(query: string, location: string, remoteOnly: boo
   );
 }
 
-async function fetchFromAdzuna(query: string, location: string): Promise<NormalizedJobListing[]> {
-  const appId = process.env.ADZUNA_APP_ID;
-  const appKey = process.env.ADZUNA_APP_KEY;
+async function fetchFromAdzuna(query: string, location: string, overrides: UserKeyOverrides = {}): Promise<NormalizedJobListing[]> {
+  const appId = process.env.ADZUNA_APP_ID || overrides.adzunaId;
+  const appKey = process.env.ADZUNA_APP_KEY || overrides.adzunaKey;
   if (!appId || !appKey) return [];
 
   const url = new URL("https://api.adzuna.com/v1/api/jobs/us/search/1");
@@ -528,8 +560,8 @@ async function fetchFromAdzuna(query: string, location: string): Promise<Normali
   );
 }
 
-async function fetchFromJooble(query: string, location: string): Promise<NormalizedJobListing[]> {
-  const key = process.env.JOOBLE_API_KEY;
+async function fetchFromJooble(query: string, location: string, overrides: UserKeyOverrides = {}): Promise<NormalizedJobListing[]> {
+  const key = process.env.JOOBLE_API_KEY || overrides.jooble;
   if (!key) return [];
 
   const res = await fetch(`https://jooble.org/api/${encodeURIComponent(key)}`, {
@@ -558,8 +590,8 @@ async function fetchFromJooble(query: string, location: string): Promise<Normali
   );
 }
 
-async function fetchFromUsaJobs(query: string, location: string): Promise<NormalizedJobListing[]> {
-  const key = process.env.USAJOBS_API_KEY;
+async function fetchFromUsaJobs(query: string, location: string, overrides: UserKeyOverrides = {}): Promise<NormalizedJobListing[]> {
+  const key = process.env.USAJOBS_API_KEY || overrides.usajobs;
   if (!key) return [];
 
   const url = new URL("https://data.usajobs.gov/api/search");
@@ -570,7 +602,7 @@ async function fetchFromUsaJobs(query: string, location: string): Promise<Normal
   const res = await fetch(url.toString(), {
     headers: {
       "Authorization-Key": key,
-      "User-Agent": process.env.USAJOBS_USER_AGENT || "career-builder@localhost",
+      "User-Agent": process.env.USAJOBS_USER_AGENT || overrides.usajobsEmail || "career-builder@localhost",
     },
     signal: AbortSignal.timeout(8500),
   });
@@ -883,6 +915,33 @@ export async function fetchAtsBoardJobs(
   return jobs;
 }
 
+// Minimal real request for a keyed job source; throws on failure.
+export async function testJobSourceProvider(
+  service: string,
+  overrides: UserKeyOverrides = {}
+): Promise<string> {
+  switch (service) {
+    case "jsearch": {
+      const jobs = await fetchFromJSearch("design", "Columbus, OH", false, overrides);
+      return `Connected - ${jobs.length} live listings returned.`;
+    }
+    case "adzuna": {
+      const jobs = await fetchFromAdzuna("drafting", "Columbus, OH", overrides);
+      return `Connected - ${jobs.length} live listings returned.`;
+    }
+    case "jooble": {
+      const jobs = await fetchFromJooble("design", "Columbus, OH", overrides);
+      return `Connected - ${jobs.length} live listings returned.`;
+    }
+    case "usajobs": {
+      const jobs = await fetchFromUsaJobs("drafting", "Columbus, OH", overrides);
+      return `Connected - ${jobs.length} live listings returned.`;
+    }
+    default:
+      return "Key stored. Live testing isn't wired for this service yet.";
+  }
+}
+
 // ======================== UNIFIED SEARCH ORCHESTRATOR ========================
 
 export async function searchLiveJobProviders(
@@ -903,6 +962,8 @@ export async function searchLiveJobProviders(
   const location = (params.location || "Columbus, OH").trim();
   const source = (params.source || "auto").toLowerCase();
   const remoteOnly = Boolean(params.remoteOnly);
+  const overrides = await loadUserKeyOverrides(actor);
+  const hasOverride = (o: string | undefined) => Boolean(o && o.length > 0);
 
   const cacheKey = `${source}:${query.toLowerCase()}:${location.toLowerCase()}:${remoteOnly}`;
   const cached = await getCached(actor, cacheKey);
@@ -934,19 +995,25 @@ export async function searchLiveJobProviders(
   };
 
   if (source === "jsearch") {
-    if (!process.env.RAPIDAPI_KEY) throw new Error("RAPIDAPI_KEY is not configured in Secrets.");
-    await runProvider("JSearch", () => fetchFromJSearch(query, location, remoteOnly));
-  } else if (source === "adzuna") {
-    if (!process.env.ADZUNA_APP_ID || !process.env.ADZUNA_APP_KEY) {
-      throw new Error("ADZUNA_APP_ID and ADZUNA_APP_KEY are not configured in Secrets.");
+    if (!process.env.RAPIDAPI_KEY && !hasOverride(overrides.jsearch)) {
+      throw new Error("JSearch key is not configured - add RAPIDAPI_KEY in .env or save it in Settings.");
     }
-    await runProvider("Adzuna", () => fetchFromAdzuna(query, location));
+    await runProvider("JSearch", () => fetchFromJSearch(query, location, remoteOnly, overrides));
+  } else if (source === "adzuna") {
+    if ((!process.env.ADZUNA_APP_ID || !process.env.ADZUNA_APP_KEY) && !(hasOverride(overrides.adzunaId) && hasOverride(overrides.adzunaKey))) {
+      throw new Error("Adzuna credentials are not configured - add them in .env or save them in Settings.");
+    }
+    await runProvider("Adzuna", () => fetchFromAdzuna(query, location, overrides));
   } else if (source === "jooble") {
-    if (!process.env.JOOBLE_API_KEY) throw new Error("JOOBLE_API_KEY is not configured in Secrets.");
-    await runProvider("Jooble", () => fetchFromJooble(query, location));
+    if (!process.env.JOOBLE_API_KEY && !hasOverride(overrides.jooble)) {
+      throw new Error("Jooble key is not configured - add JOOBLE_API_KEY in .env or save it in Settings.");
+    }
+    await runProvider("Jooble", () => fetchFromJooble(query, location, overrides));
   } else if (source === "usajobs") {
-    if (!process.env.USAJOBS_API_KEY) throw new Error("USAJOBS_API_KEY is not configured in Secrets.");
-    await runProvider("USAJOBS", () => fetchFromUsaJobs(query, location));
+    if (!process.env.USAJOBS_API_KEY && !hasOverride(overrides.usajobs)) {
+      throw new Error("USAJOBS key is not configured - add USAJOBS_API_KEY in .env or save it in Settings.");
+    }
+    await runProvider("USAJOBS", () => fetchFromUsaJobs(query, location, overrides));
   } else if (source === "remotive") {
     await runProvider("Remotive", () => fetchFromRemotive(query));
   } else if (source === "jobicy") {
@@ -958,17 +1025,17 @@ export async function searchLiveJobProviders(
   } else {
     // "auto": Try configured keyed aggregators in parallel + free live feeds
     const tasks: Promise<void>[] = [];
-    if (process.env.RAPIDAPI_KEY && !process.env.RAPIDAPI_KEY.includes("MY_")) {
-      tasks.push(runProvider("JSearch", () => fetchFromJSearch(query, location, remoteOnly)));
+    if ((process.env.RAPIDAPI_KEY && !process.env.RAPIDAPI_KEY.includes("MY_")) || hasOverride(overrides.jsearch)) {
+      tasks.push(runProvider("JSearch", () => fetchFromJSearch(query, location, remoteOnly, overrides)));
     }
-    if (process.env.ADZUNA_APP_ID && process.env.ADZUNA_APP_KEY) {
-      tasks.push(runProvider("Adzuna", () => fetchFromAdzuna(query, location)));
+    if ((process.env.ADZUNA_APP_ID && process.env.ADZUNA_APP_KEY) || (hasOverride(overrides.adzunaId) && hasOverride(overrides.adzunaKey))) {
+      tasks.push(runProvider("Adzuna", () => fetchFromAdzuna(query, location, overrides)));
     }
-    if (process.env.JOOBLE_API_KEY) {
-      tasks.push(runProvider("Jooble", () => fetchFromJooble(query, location)));
+    if (process.env.JOOBLE_API_KEY || hasOverride(overrides.jooble)) {
+      tasks.push(runProvider("Jooble", () => fetchFromJooble(query, location, overrides)));
     }
-    if (process.env.USAJOBS_API_KEY) {
-      tasks.push(runProvider("USAJOBS", () => fetchFromUsaJobs(query, location)));
+    if (process.env.USAJOBS_API_KEY || hasOverride(overrides.usajobs)) {
+      tasks.push(runProvider("USAJOBS", () => fetchFromUsaJobs(query, location, overrides)));
     }
 
     // Always include zero-auth live feeds so Auto works out of the box

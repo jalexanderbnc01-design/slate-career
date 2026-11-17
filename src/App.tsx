@@ -95,7 +95,8 @@ export default function App() {
 
   // Same-origin: attach an Escape listener inside the settings page that asks the
   // parent to close. Attaching at runtime keeps the prototype file untouched.
-  const handleSettingsFrameLoad = () => {
+  // Also hands the page a fresh auth token so its API rows can call the server.
+  const handleSettingsFrameLoad = async () => {
     const win = settingsIframeRef.current?.contentWindow;
     if (!win) return;
     win.addEventListener("keydown", (e: KeyboardEvent) => {
@@ -103,6 +104,18 @@ export default function App() {
         win.parent.postMessage({ type: "career-engine:settings-close" }, window.location.origin);
       }
     });
+    try {
+      const { getAuthHeaders } = await import("./firebase/client");
+      const authHeaders = await getAuthHeaders();
+      if (authHeaders.Authorization) {
+        win.postMessage(
+          { type: "career-engine:settings-auth", token: authHeaders.Authorization.replace("Bearer ", "") },
+          window.location.origin
+        );
+      }
+    } catch {
+      // Page still renders; its API rows will show "sign in required".
+    }
   };
 
   // Active inputs

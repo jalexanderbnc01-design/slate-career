@@ -8,7 +8,15 @@ import {
   fetchAtsBoardJobs,
   getJobSourcesStatus,
   getCacheStats,
+  loadUserKeyOverrides,
+  testJobSourceProvider,
 } from "./server/jobProviders";
+import {
+  SERVICE_IDS,
+  getServiceKeyStates,
+  setUserServiceKey,
+  deleteUserServiceKey,
+} from "./server/serviceKeys";
 import { createSlateAIRouter } from "./server/ai/router";
 import { createNotionRouter } from "./server/notion/router";
 import { createClayRouter, createJobsIngestRouter } from "./server/clay/router";
@@ -790,6 +798,105 @@ app.get("/api/job-sources", requireFirebaseAuth, (req: AuthenticatedRequest, res
     sources: getJobSourcesStatus(),
     cache: getCacheStats(actor),
   });
+});
+
+// ======================== SETTINGS API KEY MANAGEMENT ========================
+// Keys are write-only: saved into Firestore, never returned to the client.
+
+app.get("/api/settings/keys", requireFirebaseAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const actor: FirestoreActor = { uid: req.uid!, idToken: req.idToken };
+    const services = await getServiceKeyStates(actor);
+    res.json({ services });
+  } catch (error: any) {
+    console.error("Error in GET /api/settings/keys:", error);
+    res.status(500).json({ error: error.message || "Failed to read service key states." });
+  }
+});
+
+app.post("/api/settings/keys", requireFirebaseAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { service, key } = req.body || {};
+    if (!service || !(SERVICE_IDS as readonly string[]).includes(service)) {
+      return res.status(400).json({ error: "Unknown service." });
+    }
+    let value = String(key || "").trim();
+    let extra: string | undefined;
+    // Adzuna (appId + appKey) and USAJOBS (key + email) need two values;
+    // accept them as `value:secondary` in the single field.
+    if ((service === "adzuna" || service === "usajobs") && value.includes(":") && !extra) {
+      const sep = value.indexOf(":");
+      extra = value.slice(sep + 1).trim();
+      value = value.slice(0, sep).trim();
+    }
+    if (!value) return res.status(400).json({ error: "Paste a key first." });
+    const actor: FirestoreActor = { uid: req.uid!, idToken: req.idToken };
+    const stored = await setUserServiceKey(actor, service as any, value, extra);
+    res.json({ ok: true, updatedAt: stored.updatedAt });
+  } catch (error: any) {
+    console.error("Error in POST /api/settings/keys:", error);
+    res.status(500).json({ error: error.message || "Failed to save key." });
+  }
+});
+
+app.delete("/api/settings/keys/:service", requireFirebaseAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const service = req.params.service;
+    if (!service || !(SERVICE_IDS as readonly string[]).includes(service)) {
+      return res.status(400).json({ error: "Unknown service." });
+    }
+    const actor: FirestoreActor = { uid: req.uid!, idToken: req.idToken };
+    await deleteUserServiceKey(actor, service as any);
+    res.json({ ok: true });
+  } catch (error: any) {
+    console.error("Error in DELETE /api/settings/keys/:service:", error);
+    res.status(500).json({ error: error.message || "Failed to remove key." });
+  }
+});
+
+app.post("/api/settings/keys/test", requireFirebaseAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { service } = req.body || {};
+    if (!service || !(SERVICE_IDS as readonly string[]).includes(service)) {
+      return res.status(400).json({ error: "Unknown service." });
+    }
+    const actor: FirestoreActor = { uid: req.uid!, idToken: req.idToken };
+    const states = await getServiceKeyStates(actor);
+    if (!states[service]?.configured) {
+      return res.status(400).json({ error: `Save a ${String(service)} key first.` });
+    }
+
+    if (["jsearch", "adzuna", "jooble", "usajobs"].includes(service)) {
+      const overrides = await loadUserKeyOverrides(actor);
+      try {
+        const note = await testJobSourceProvider(String(service), overrides);
+        return res.json({ ok: true, note });
+      } catch (err: any) {
+        return res.json({ ok: false, note: err?.message || "Request failed." });
+      }
+    }
+
+    if (service === "gemini") {
+      const { getUserServiceKeys } = await import("./server/serviceKeys");
+      const userKeys = await getUserServiceKeys(actor);
+      const geminiKey = process.env.GEMINI_API_KEY || userKeys.gemini?.key;
+      try {
+        const testRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=1&key=${encodeURIComponent(geminiKey || "")}`, {
+          headers: { "User-Agent": "aistudio-build" },
+          signal: AbortSignal.timeout(8500),
+        });
+        if (!testRes.ok) throw new Error(`Gemini responded HTTP ${testRes.status}`);
+        return res.json({ ok: true, note: "Connected to the Gemini API." });
+      } catch (err: any) {
+        return res.json({ ok: false, note: err?.message || "Gemini request failed." });
+      }
+    }
+
+    res.json({ ok: true, note: "Key stored. Live testing isn't wired for this service yet." });
+  } catch (error: any) {
+    console.error("Error in POST /api/settings/keys/test:", error);
+    res.status(500).json({ error: error.message || "Test failed." });
+  }
 });
 
 // 6B. ATS Public Career Board Lookup (Greenhouse, Lever, Ashby)
