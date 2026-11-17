@@ -2,7 +2,7 @@ import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import {
   getAuth,
   GoogleAuthProvider,
-  signInWithRedirect,
+  signInWithCredential,
   signOut,
   type Auth,
 } from "firebase/auth";
@@ -48,11 +48,79 @@ export const db: Firestore = createFirestoreInstance(app);
 export const auth: Auth = getAuth(app);
 export const storage: FirebaseStorage = getStorage(app);
 
-const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({ prompt: "select_account" });
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        oauth2: {
+          initTokenClient(config: {
+            client_id: string;
+            scope: string;
+            callback: (response: { access_token?: string; error?: string }) => void;
+            error_callback?: (error: { type?: string; message?: string }) => void;
+          }): { requestAccessToken(): void };
+        };
+      };
+    };
+  }
+}
 
-export async function signInWithGoogle() {
-  await signInWithRedirect(auth, googleProvider);
+let gisScriptPromise: Promise<void> | null = null;
+
+function loadGoogleIdentityServices(): Promise<void> {
+  if (gisScriptPromise) return gisScriptPromise;
+  gisScriptPromise = new Promise<void>((resolve, reject) => {
+    if (window.google?.accounts?.oauth2) {
+      resolve();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => {
+      gisScriptPromise = null;
+      reject(new Error("Failed to load Google Identity Services. Check your internet connection or ad blockers."));
+    };
+    document.head.appendChild(script);
+  });
+  return gisScriptPromise;
+}
+
+/**
+ * Signs in through Google Identity Services' token client instead of
+ * Firebase's hosted popup/redirect flow. The GIS popup delivers the access
+ * token straight to this page with postMessage, so no cross-origin frame
+ * handshake with the Firebase auth domain is involved — immune to
+ * Cross-Origin-Opener-Policy blocks and third-party storage partitioning.
+ */
+export async function signInWithGoogle(): Promise<void> {
+  await loadGoogleIdentityServices();
+  const oauth2 = window.google?.accounts?.oauth2;
+  if (!oauth2) {
+    throw new Error("Google Identity Services is unavailable in this browser.");
+  }
+  await new Promise<void>((resolve, reject) => {
+    oauth2.initTokenClient({
+      client_id: firebaseConfig.oAuthClientId,
+      scope: "openid email profile",
+      callback: (response) => {
+        if (response?.error || !response?.access_token) {
+          reject(new Error(response?.error
+            ? `Google token request failed: ${response.error}`
+            : "Google sign-in closed without issuing a token."));
+          return;
+        }
+        const credential = GoogleAuthProvider.credential(undefined, response.access_token);
+        signInWithCredential(auth, credential)
+          .then(() => resolve())
+          .catch((err) => reject(err));
+      },
+      error_callback: (error) => {
+        reject(new Error(error?.message || error?.type || "Google sign-in was closed or blocked before completing."));
+      },
+    }).requestAccessToken();
+  });
 }
 
 export async function signOutFirebase() {

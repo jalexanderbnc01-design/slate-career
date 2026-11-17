@@ -52,6 +52,14 @@ interface CacheEntry {
 
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
+// Several job-board APIs (e.g. The Muse) reject requests that arrive without a
+// browser-like User-Agent, causing silent provider losses (HTTP 403).
+const LIVE_FEED_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+  Accept: "application/json",
+};
+
 async function getCached(
   actor: FirestoreActor | undefined,
   key: string
@@ -622,7 +630,7 @@ async function fetchFromRemotive(query: string): Promise<NormalizedJobListing[]>
   }
   url.searchParams.set("limit", "15");
 
-  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(8500) });
+  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(8500), headers: LIVE_FEED_HEADERS });
   if (!res.ok) throw new Error(`Remotive HTTP ${res.status}`);
   const payload = (await res.json()) as { jobs?: any[] };
   let items = Array.isArray(payload?.jobs) ? payload.jobs : [];
@@ -631,6 +639,7 @@ async function fetchFromRemotive(query: string): Promise<NormalizedJobListing[]>
   if (items.length === 0) {
     const fallbackRes = await fetch("https://remotive.com/api/remote-jobs?limit=12", {
       signal: AbortSignal.timeout(8500),
+      headers: LIVE_FEED_HEADERS,
     });
     if (fallbackRes.ok) {
       const fbPayload = (await fallbackRes.json()) as { jobs?: any[] };
@@ -638,7 +647,7 @@ async function fetchFromRemotive(query: string): Promise<NormalizedJobListing[]>
     }
   }
 
-  return items.slice(0, 8).map((item) =>
+  return items.slice(0, 12).map((item) =>
     buildNormalizedJob({
       id: `remotive-${item.id}`,
       title: item.title || "Remote Position",
@@ -662,7 +671,7 @@ async function fetchFromTheMuse(query: string, location: string): Promise<Normal
     url.searchParams.set("location", "Columbus, OH");
   }
 
-  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(8500) });
+  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(8500), headers: LIVE_FEED_HEADERS });
   if (!res.ok) throw new Error(`The Muse HTTP ${res.status}`);
   const payload = (await res.json()) as { results?: any[] };
   let items = Array.isArray(payload?.results) ? payload.results : [];
@@ -671,6 +680,7 @@ async function fetchFromTheMuse(query: string, location: string): Promise<Normal
   if (items.length < 3) {
     const remoteRes = await fetch("https://www.themuse.com/api/public/jobs?location=Flexible%20%2F%20Remote&page=1", {
       signal: AbortSignal.timeout(8500),
+      headers: LIVE_FEED_HEADERS,
     });
     if (remoteRes.ok) {
       const remotePayload = (await remoteRes.json()) as { results?: any[] };
@@ -685,7 +695,7 @@ async function fetchFromTheMuse(query: string, location: string): Promise<Normal
       return { item, score: scoreKeywordOverlap(query, text) };
     })
     .sort((a, b) => b.score - a.score)
-    .slice(0, 8)
+    .slice(0, 12)
     .map((r) => r.item);
 
   return ranked.map((item) => {
@@ -708,6 +718,7 @@ async function fetchFromTheMuse(query: string, location: string): Promise<Normal
 async function fetchFromArbeitnow(query: string): Promise<NormalizedJobListing[]> {
   const res = await fetch("https://www.arbeitnow.com/api/job-board-api", {
     signal: AbortSignal.timeout(8500),
+    headers: LIVE_FEED_HEADERS,
   });
   if (!res.ok) throw new Error(`Arbeitnow HTTP ${res.status}`);
   const payload = (await res.json()) as { data?: any[] };
@@ -720,7 +731,7 @@ async function fetchFromArbeitnow(query: string): Promise<NormalizedJobListing[]
       score: scoreKeywordOverlap(query, `${item.title} ${item.description} ${(item.tags || []).join(" ")}`),
     }))
     .sort((a, b) => b.score - a.score)
-    .slice(0, 8)
+    .slice(0, 12)
     .map((r) => r.item);
 
   return ranked.map((item) =>

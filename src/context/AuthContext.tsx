@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
-import { onAuthStateChanged, getRedirectResult, type User } from "firebase/auth";
+import { onAuthStateChanged, type User } from "firebase/auth";
 import {
   auth,
   signInWithGoogle,
@@ -25,6 +25,7 @@ interface AuthContextValue {
   clearStaleWarning: () => void;
   migrationSummary: MigrationSummary | null;
   setMigrationSummary: (summary: MigrationSummary | null) => void;
+  authDebugLog: string[];
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -37,15 +38,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [migrationSummary, setMigrationSummary] =
     useState<MigrationSummary | null>(null);
 
+  const [authDebugLog, setAuthDebugLog] = useState<string[]>([]);
+  const pushAuthDebug = (msg: string) => {
+    const stamp = new Date().toISOString().slice(11, 23);
+    const line = `[${stamp}] ${msg}`;
+    console.info("[auth-debug]", line);
+    setAuthDebugLog((prev) => [...prev.slice(-19), line]);
+  };
+
   const migrationRunForRef = useRef<string | null>(null);
 
   useEffect(() => {
-    getRedirectResult(auth).catch((err) => {
-      setAuthError(err?.message || "Google sign-in failed.");
-    });
     const unsub = onAuthStateChanged(
       auth,
       (nextUser) => {
+        pushAuthDebug(
+          nextUser
+            ? `onAuthStateChanged: signed in as ${nextUser.email || nextUser.uid}`
+            : "onAuthStateChanged: signed out (user = null)"
+        );
         setUser(nextUser);
         setAuthLoading(false);
         setAuthError(null);
@@ -76,9 +87,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = async () => {
     setAuthError(null);
+    pushAuthDebug("signIn() clicked: opening Google Identity Services token popup...");
     try {
       await signInWithGoogle();
+      pushAuthDebug("Google token flow: completed, Firebase sign-in resolved.");
     } catch (err: any) {
+      pushAuthDebug(`signIn ERROR: ${err?.code || ""} ${err?.message || err}`);
       setAuthError(err?.message || "Google sign-in failed.");
     }
   };
@@ -105,6 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         clearStaleWarning: () => setStaleWarning(null),
         migrationSummary,
         setMigrationSummary,
+        authDebugLog,
       }}
     >
       {children}
@@ -188,7 +203,7 @@ export function AuthStatusBanner() {
 }
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
-  const { user, authLoading, authError, signIn } = useAuth();
+  const { user, authLoading, authError, signIn, authDebugLog } = useAuth();
 
   if (authLoading) {
     return (
@@ -224,6 +239,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             </div>
           )}
 
+          <div className="p-3 rounded-lg bg-slate-950/70 border border-slate-800 text-[11px] text-slate-400 leading-relaxed">
+            <p className="font-semibold text-slate-300 mb-1">Browser will ask for permission</p>
+            <p>
+              When you sign in, watch for a cookie or tracking icon at the <span className="font-mono text-slate-200">left of the address bar</span>. If prompted, choose <span className="text-slate-200">Allow</span> so Google and Firebase can share the sign-in session. If a sign-in attempt silently returns to this screen, click that icon, allow cookies for <span className="font-mono">accounts.google.com</span> and <span className="font-mono">slate-512218.firebaseapp.com</span>, then sign in again.
+            </p>
+          </div>
+
           <button
             type="button"
             onClick={signIn}
@@ -232,6 +254,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             <LogIn className="w-4 h-4" />
             <span>Sign in with Google</span>
           </button>
+
+          {authDebugLog.length > 0 && (
+            <pre className="p-2 rounded bg-slate-950 border border-slate-800 text-[10px] text-slate-400 font-mono overflow-auto max-h-40 whitespace-pre-wrap">
+              {authDebugLog.join("\n")}
+            </pre>
+          )}
         </div>
       </div>
     );
