@@ -383,15 +383,7 @@ export function getJobSourcesStatus(): JobSourceStatus[] {
       category: "Aggregator",
       requiresKey: false,
       configured: true,
-      description: "Queries configured aggregators first, then live no-auth feeds (The Muse, Remotive, Arbeitnow).",
-    },
-    {
-      id: "themuse",
-      name: "The Muse",
-      category: "Niche Free",
-      requiresKey: false,
-      configured: true,
-      description: "Free public JSON API with Columbus, OH & remote startup/creative listings.",
+      description: "Queries configured aggregators first, then live no-auth feeds (Remotive, Jobicy, Himalayas, Arbeitnow).",
     },
     {
       id: "remotive",
@@ -664,53 +656,97 @@ async function fetchFromRemotive(query: string): Promise<NormalizedJobListing[]>
   );
 }
 
-async function fetchFromTheMuse(query: string, location: string): Promise<NormalizedJobListing[]> {
-  const url = new URL("https://www.themuse.com/api/public/jobs");
-  url.searchParams.set("page", "1");
-  if (location.toLowerCase().includes("columbus")) {
-    url.searchParams.set("location", "Columbus, OH");
+async function fetchFromJobicy(query: string): Promise<NormalizedJobListing[]> {
+  const url = new URL("https://jobicy.com/api/v2/remote-jobs");
+  url.searchParams.set("count", "50");
+  const primaryKeyword = query.trim().split(/\s+/).slice(0, 2).join(" ").toLowerCase();
+  if (primaryKeyword) {
+    url.searchParams.set("tag", primaryKeyword);
   }
 
+  let items: any[] = [];
   const res = await fetch(url.toString(), { signal: AbortSignal.timeout(8500), headers: LIVE_FEED_HEADERS });
-  if (!res.ok) throw new Error(`The Muse HTTP ${res.status}`);
-  const payload = (await res.json()) as { results?: any[] };
-  let items = Array.isArray(payload?.results) ? payload.results : [];
+  if (res.ok) {
+    const payload = (await res.json()) as { jobs?: any[] };
+    items = Array.isArray(payload?.jobs) ? payload.jobs : [];
+  }
 
-  // Fallback to Flexible / Remote if Columbus page has few matches
-  if (items.length < 3) {
-    const remoteRes = await fetch("https://www.themuse.com/api/public/jobs?location=Flexible%20%2F%20Remote&page=1", {
+  // Tag search can be too narrow on niche keywords; fall back to the full feed and rank.
+  if (items.length < 4) {
+    const fallbackRes = await fetch("https://jobicy.com/api/v2/remote-jobs?count=50", {
       signal: AbortSignal.timeout(8500),
       headers: LIVE_FEED_HEADERS,
     });
-    if (remoteRes.ok) {
-      const remotePayload = (await remoteRes.json()) as { results?: any[] };
-      const extra = Array.isArray(remotePayload?.results) ? remotePayload.results : [];
-      items = [...items, ...extra];
+    if (fallbackRes.ok) {
+      const fbPayload = (await fallbackRes.json()) as { jobs?: any[] };
+      const fbItems = Array.isArray(fbPayload?.jobs) ? fbPayload.jobs : [];
+      items = fbItems
+        .map((item: any) => ({
+          item,
+          score: scoreKeywordOverlap(query, `${item.jobTitle || ""} ${item.jobExcerpt || ""} ${(item.jobIndustry || []).join(" ")}`),
+        }))
+        .sort((a: any, b: any) => b.score - a.score)
+        .map((r: any) => r.item);
     }
   }
 
-  const ranked = items
-    .map((item) => {
-      const text = `${item.name || ""} ${item.contents || ""} ${(item.categories || []).map((c: any) => c.name).join(" ")}`;
-      return { item, score: scoreKeywordOverlap(query, text) };
+  return items.slice(0, 12).map((item) =>
+    buildNormalizedJob({
+      id: `jobicy-${item.id || Math.random().toString(36).slice(2)}`,
+      title: item.jobTitle || "Remote Position",
+      company: item.companyName || "Remote Employer",
+      location: item.jobGeo ? `Remote (${item.jobGeo})` : "Remote",
+      salary: "Compensation listed on source",
+      description: item.jobDescription || item.jobExcerpt || "",
+      remoteHint: true,
+      applyUrl: item.url,
+      source: "Jobicy",
+      postedAt: item.pubDate,
+      tags: Array.isArray(item.jobIndustry) ? item.jobIndustry : Array.isArray(item.jobType) ? item.jobType : undefined,
     })
+  );
+}
+
+async function fetchFromHimalayas(query: string): Promise<NormalizedJobListing[]> {
+  const res = await fetch("https://himalayas.app/jobs/api?limit=50", {
+    signal: AbortSignal.timeout(8500),
+    headers: LIVE_FEED_HEADERS,
+  });
+  if (!res.ok) throw new Error(`Himalayas HTTP ${res.status}`);
+  const payload = (await res.json()) as { jobs?: any[] };
+  const items = Array.isArray(payload?.jobs) ? payload.jobs : [];
+
+  const ranked = items
+    .map((item) => ({
+      item,
+      score: scoreKeywordOverlap(
+        query,
+        `${item.title || ""} ${item.excerpt || ""} ${(item.categories || []).join(" ")} ${(item.parentCategories || []).join(" ")}`
+      ),
+    }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 12)
     .map((r) => r.item);
 
   return ranked.map((item) => {
-    const locs = Array.isArray(item.locations) ? item.locations.map((l: any) => l.name).join(" / ") : location;
+    const salary =
+      item.minSalary != null || item.maxSalary != null
+        ? formatSalaryRange(item.minSalary, item.maxSalary, item.salaryPeriod || "yr")
+        : "Compensation listed on source";
+    const locs = Array.isArray(item.locationRestrictions) ? item.locationRestrictions.join(" / ") : "";
+    const remoteish = !locs || /remote|anywhere|worldwide/i.test(locs);
     return buildNormalizedJob({
-      id: `muse-${item.id}`,
-      title: item.name || "Open Role",
-      company: item.company?.name || "Employer",
-      location: locs || "Columbus, OH / Remote",
-      description: item.contents || "",
-      remoteHint: locs.toLowerCase().includes("remote") || locs.toLowerCase().includes("flexible"),
-      applyUrl: item.refs?.landing_page,
-      source: "The Muse",
-      postedAt: item.publication_date,
-      tags: Array.isArray(item.categories) ? item.categories.map((c: any) => c.name) : undefined,
+      id: `himalayas-${item.id || Math.random().toString(36).slice(2)}`,
+      title: item.title || "Remote Position",
+      company: item.companyName || "Remote Employer",
+      location: remoteish ? "Remote" : locs,
+      salary,
+      description: item.description || item.excerpt || "",
+      remoteHint: remoteish,
+      applyUrl: item.applicationLink || item.guid || (item.companySlug ? `https://himalayas.app/companies/${item.companySlug}` : undefined),
+      source: "Himalayas",
+      postedAt: item.pubDate,
+      tags: Array.isArray(item.categories) ? item.categories.slice(0, 4) : undefined,
     });
   });
 }
@@ -913,8 +949,10 @@ export async function searchLiveJobProviders(
     await runProvider("USAJOBS", () => fetchFromUsaJobs(query, location));
   } else if (source === "remotive") {
     await runProvider("Remotive", () => fetchFromRemotive(query));
-  } else if (source === "themuse") {
-    await runProvider("The Muse", () => fetchFromTheMuse(query, location));
+  } else if (source === "jobicy") {
+    await runProvider("Jobicy", () => fetchFromJobicy(query));
+  } else if (source === "himalayas") {
+    await runProvider("Himalayas", () => fetchFromHimalayas(query));
   } else if (source === "arbeitnow") {
     await runProvider("Arbeitnow", () => fetchFromArbeitnow(query));
   } else {
@@ -934,7 +972,8 @@ export async function searchLiveJobProviders(
     }
 
     // Always include zero-auth live feeds so Auto works out of the box
-    tasks.push(runProvider("The Muse", () => fetchFromTheMuse(query, location)));
+    tasks.push(runProvider("Jobicy", () => fetchFromJobicy(query)));
+    tasks.push(runProvider("Himalayas", () => fetchFromHimalayas(query)));
     tasks.push(runProvider("Remotive", () => fetchFromRemotive(query)));
 
     await Promise.all(tasks);

@@ -1025,8 +1025,9 @@ export default function ColumbusJobFinder({
                         ) : (
                           <>
                             <option value="auto">Auto Multi-Feed</option>
-                            <option value="themuse">The Muse (Free)</option>
                             <option value="remotive">Remotive (Free)</option>
+                            <option value="jobicy">Jobicy (Free)</option>
+                            <option value="himalayas">Himalayas (Free)</option>
                             <option value="arbeitnow">Arbeitnow (Free)</option>
                             <option value="ai_scan">AI Market Scan</option>
                           </>
