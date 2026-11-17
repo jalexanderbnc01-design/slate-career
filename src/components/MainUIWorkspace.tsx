@@ -2297,6 +2297,17 @@ function JobFeedPrototypePanel({ theme }: { theme: 'light' | 'dark' }) {
     }
   }, [fetchingLive]);
 
+  // Auto-populate the feed the first time it opens with nothing cached.
+  const autoFetchedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!storeReady || autoFetchedRef.current) return;
+    autoFetchedRef.current = true;
+    const liveRaw = getUserStoreValue(LIVE_JOBS_STORE);
+    const cached = liveRaw ? JSON.parse(liveRaw) : null;
+    if (Array.isArray(cached) && cached.length) return; // restoreFeedState already sent cached jobs
+    fetchLiveJobs();
+  }, [storeReady, fetchLiveJobs]);
+
   const syncTheme = (nextTheme: 'light' | 'dark') => {
     try {
       const doc = iframeRef.current?.contentDocument;

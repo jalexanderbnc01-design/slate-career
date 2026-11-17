@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { UserProfile, JobScores, JobFixture, TrackerRow, WeeklyTask } from "../types";
 import { initialColumbusFixtures, defaultTrackerRows, initialWeeklyTasks, initialWalkInStops } from "../data/columbusData";
 import { authFetch } from "../firebase/client";
@@ -232,6 +232,16 @@ export default function ColumbusJobFinder({
       setSearchLoading(false);
     }
   };
+
+  // Auto-populate with live data on first load when starting empty.
+  const autoSearchDoneRef = useRef(false);
+  useEffect(() => {
+    if (autoSearchDoneRef.current) return;
+    autoSearchDoneRef.current = true;
+    if (jobs.length > 0) return;
+    handleLiveAggregatorSearch("creative production, CAD drafting, print shop, remote support");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ATS public board search execution
   const handleAtsSearch = async () => {
