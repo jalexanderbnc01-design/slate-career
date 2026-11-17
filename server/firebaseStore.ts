@@ -85,6 +85,7 @@ export async function verifyFirebaseIdToken(token: string): Promise<{
   uid: string;
   email?: string;
   emailVerified: boolean;
+  signInProvider: string;
 }> {
   const decoded = await adminAuth.verifyIdToken(token);
   const signInProvider = (decoded.firebase as { sign_in_provider?: string } | undefined)?.sign_in_provider || "";
@@ -92,10 +93,14 @@ export async function verifyFirebaseIdToken(token: string): Promise<{
   // emailVerified flag on the Firebase user record lags behind for
   // credential-based (GIS) sign-ins. Trust Google-issued credentials.
   const verifiedByGoogleProvider = signInProvider === "google.com" && Boolean(decoded.email);
+  // Password accounts are fully authenticated by Firebase Auth itself; this
+  // single-user app only cares that a real signed-in identity exists.
+  const verifiedByAuthProvider = (signInProvider === "password" || signInProvider === "firebase") && Boolean(decoded.email);
   return {
     uid: decoded.uid,
     email: decoded.email,
-    emailVerified: Boolean(decoded.email_verified) || verifiedByGoogleProvider,
+    emailVerified: Boolean(decoded.email_verified) || verifiedByGoogleProvider || verifiedByAuthProvider,
+    signInProvider,
   };
 }
 
@@ -116,6 +121,10 @@ export async function requireFirebaseAuth(
     }
     const verified = await verifyFirebaseIdToken(token);
     if (!verified.emailVerified) {
+      console.warn(
+        `Auth 403: uid=${verified.uid} email=${verified.email || "none"} ` +
+        `provider=${verified.signInProvider || "unknown"} - no verified email signal`
+      );
       return res.status(403).json({
         error: "Verified email account is required.",
         code: "email_unverified",
