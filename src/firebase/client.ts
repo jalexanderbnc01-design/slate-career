@@ -2,7 +2,7 @@ import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import {
   getAuth,
   GoogleAuthProvider,
-  signInWithPopup,
+  signInWithRedirect,
   signOut,
   type Auth,
 } from "firebase/auth";
@@ -52,7 +52,7 @@ const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: "select_account" });
 
 export async function signInWithGoogle() {
-  return signInWithPopup(auth, googleProvider);
+  await signInWithRedirect(auth, googleProvider);
 }
 
 export async function signOutFirebase() {

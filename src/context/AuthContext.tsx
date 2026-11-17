@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
-import { onAuthStateChanged, type User } from "firebase/auth";
+import { onAuthStateChanged, getRedirectResult, type User } from "firebase/auth";
 import {
   auth,
   signInWithGoogle,
@@ -40,6 +40,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const migrationRunForRef = useRef<string | null>(null);
 
   useEffect(() => {
+    getRedirectResult(auth).catch((err) => {
+      setAuthError(err?.message || "Google sign-in failed.");
+    });
     const unsub = onAuthStateChanged(
       auth,
       (nextUser) => {
